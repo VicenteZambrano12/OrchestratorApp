@@ -1,4 +1,5 @@
-# Byte-compiled / optimized / DLL files
+# Python artifacts at any depth, including backend/src/
+# Ignore generated caches, not source folders such as backend/src/utils/cache/
 __pycache__/
 *.py[codz]
 *$py.class
@@ -149,8 +150,11 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments for both backend and frontend (keep example files)
 .env
+.env.*
+!.env.example
+!.env.*.example
 .envrc
 .venv
 env/
@@ -231,11 +235,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
-# Frontend environment overrides (keep example files)
-.env.*
-!.env.example
-!.env.*.example
 
 # Keep frontend source libraries despite the Python lib/ rule
 !frontend/src/lib/
