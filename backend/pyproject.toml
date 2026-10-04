@@ -1,0 +1,12 @@
+[project]
+name = "orchestrator-backend"
+version = "0.1.0"
+description = "FastAPI backend for OrchestratorApp"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn>=0.30,<1.0",
+]
+
+[tool.uv]
+package = false
