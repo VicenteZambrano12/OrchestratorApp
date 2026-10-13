@@ -1,0 +1,23 @@
+{
+	"language": {
+		"ES": "Spanish",
+		"EN": "English"
+	},
+	"subsystems": [
+		{
+			"id": "routine_maker",
+			"name": "Routine Maker",
+			"description": "Create and return a workout routine when the user asks for a new gym routine, training plan, or workout schedule. Tailor the routine to the user's goals, experience, available equipment, and training availability, including exercises, sets, repetitions, and rest periods. Use this system for creating a routine, not for explaining how to perform an individual exercise or reviewing past workouts."
+		},
+		{
+			"id": "exercise_explainer",
+			"name": "Exercise Explainer",
+			"description": "Explain how to perform a gym exercise when the user asks about its execution, technique, setup, movement, breathing, or common mistakes. Return step-by-step instructions and relevant safety guidance for the requested exercise. Use this system for exercise instructions, not for creating a complete routine or analyzing workout history."
+		},
+		{
+			"id": "past_routines_analyzer",
+			"name": "Past Routines Analyzer",
+			"description": "Retrieve, summarize, compare, and analyze the user's past workout routines and training history when the user asks about previous routines, completed workouts, historical performance, or progress over time. Base the response on available historical records and identify trends in exercises, weights, repetitions, training volume, and consistency. Use this system for questions about history or past routines, not for creating a new routine or explaining exercise technique."
+		}
+	]
+}
