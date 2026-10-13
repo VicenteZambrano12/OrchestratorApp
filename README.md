@@ -74,7 +74,11 @@ It does not execute the subsystem. API usage and quota apply; errors go to stder
 and return exit status 1. Use `--language ES` for Spanish.
 
 `backend/src/systems/orch/Orchestrator.py` defines the pipeline's routing entry
-point. Construct `Orchestrator(selector)` with a callable that accepts
+point and imports its routing utilities from `backend/src/utils/orch/`,
+with one utility function per file named after that function.
+Prompt loading, provider adaptation, request/selection validation, and no-match
+messages live in those utility modules; the existing class interface is unchanged.
+Construct `Orchestrator(selector)` with a callable that accepts
 `(query, subsystems, language)` and returns a configured subsystem's `id` or `no_system`. The callable
 is where your AI provider makes its decision using the subsystem descriptions.
 This injected-selector interface remains available alongside `from_gemini()`.

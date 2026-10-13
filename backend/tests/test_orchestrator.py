@@ -10,6 +10,11 @@ from pydantic import ValidationError
 
 from systems.orch.Orchestrator import Orchestrator
 from utils.general.GeminiApiCall import GeminiClient
+from utils.orch.create_chat_selector import create_chat_selector
+from utils.orch.create_gemini_chat_model import create_gemini_chat_model
+from utils.orch.no_system_message import no_system_message
+from utils.orch.resolve_systems_path import resolve_systems_path
+from utils.orch.route import route
 
 
 SMOKE_SCRIPT = (
@@ -93,6 +98,25 @@ class OrchestratorTests(unittest.TestCase):
                 },
             ],
         }
+
+    def test_routing_utilities_can_be_used_directly(self):
+        client = Mock(spec=GeminiClient)
+        client.generate.return_value = " coding\n"
+        selector = create_chat_selector(create_gemini_chat_model(client))
+
+        self.assertEqual(
+            route(selector, resolve_systems_path(), self.payload, "ES"), "coding"
+        )
+        self.assertEqual(
+            json.loads(client.generate.call_args.args[0]),
+            {**self.payload, "language": "ES"},
+        )
+        self.assertEqual(no_system_message("ES"), Orchestrator.no_system_message("ES"))
+
+    def test_utility_systems_path_defaults_to_backend_configuration(self):
+        expected = Path(__file__).resolve().parents[1] / "src/config/systems.json"
+        self.assertEqual(resolve_systems_path(), expected)
+        self.assertEqual(resolve_systems_path("custom.json"), Path("custom.json"))
 
     def test_routes_mapping_and_returns_only_target_id(self):
         result = self.orchestrator.route(self.payload)
@@ -323,7 +347,7 @@ class OrchestratorTests(unittest.TestCase):
         )
 
     def test_gemini_default_client_is_created_once(self):
-        with patch("systems.orch.Orchestrator.GeminiClient") as create_client:
+        with patch("utils.orch.create_gemini_chat_model.GeminiClient") as create_client:
             create_client.return_value.generate.return_value = "coding"
             orchestrator = Orchestrator.from_gemini()
             orchestrator.route(self.payload)
