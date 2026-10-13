@@ -1,0 +1,475 @@
+{
+    "database_name": "gym_app.db",
+    "exported_at": "2026-10-13T21:27:40.113859+00:00",
+    "tables": {
+        "dim_exercises": {
+            "row_count": 165,
+            "columns": [
+                {
+                    "column_id": 0,
+                    "name": "id",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": true
+                },
+                {
+                    "column_id": 1,
+                    "name": "name",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 2,
+                    "name": "description",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 3,
+                    "name": "instructions",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 4,
+                    "name": "primary_muscle",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 5,
+                    "name": "secondary_muscles",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 6,
+                    "name": "pattern",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 7,
+                    "name": "equipment",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 8,
+                    "name": "mechanic",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 9,
+                    "name": "level",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 10,
+                    "name": "intensity",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 11,
+                    "name": "tracking_type",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "'weight_reps'",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 12,
+                    "name": "is_unilateral",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": "0",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 13,
+                    "name": "media_url",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 14,
+                    "name": "icon_url",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 15,
+                    "name": "anatomy_diagram_url",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 16,
+                    "name": "is_custom",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": "0",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 17,
+                    "name": "created_at",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "CURRENT_TIMESTAMP",
+                    "is_primary_key": false
+                }
+            ],
+            "foreign_keys": [],
+            "indexes": [
+                {
+                    "name": "idx_exercises_pattern",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "pattern"
+                    ]
+                },
+                {
+                    "name": "idx_exercises_equipment",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "equipment"
+                    ]
+                },
+                {
+                    "name": "idx_exercises_primary_muscle",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "primary_muscle"
+                    ]
+                },
+                {
+                    "name": "sqlite_autoindex_dim_exercises_1",
+                    "is_unique": true,
+                    "origin": "u",
+                    "columns": [
+                        "name"
+                    ]
+                }
+            ],
+            "ddl_sql": "CREATE TABLE dim_exercises (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT NOT NULL UNIQUE,\n    description TEXT,\n    instructions TEXT NOT NULL,\n    \n    -- Categorization & Filtering\n    primary_muscle TEXT NOT NULL CHECK(primary_muscle IN (\n        'chest', 'back', 'shoulders', 'quads', 'hamstrings', \n        'glutes', 'calves', 'triceps', 'biceps', 'forearms', 'core'\n    )),\n    secondary_muscles TEXT, -- JSON array format, e.g., '[\"triceps\", \"shoulders\"]'\n    pattern TEXT NOT NULL CHECK(pattern IN (\n        'push', 'pull', 'legs', 'core', 'cardio'\n    )),\n    equipment TEXT NOT NULL CHECK(equipment IN (\n        'barbell', 'dumbbell', 'machine', 'cable', \n        'bodyweight', 'kettlebell', 'band', 'smith_machine', 'other', 'none'\n    )),\n    \n    -- Exercise Characteristics\n    mechanic TEXT NOT NULL CHECK(mechanic IN ('compound', 'isolation')),\n    level TEXT NOT NULL CHECK(level IN ('beginner', 'intermediate', 'advanced')),\n    intensity TEXT NOT NULL CHECK(intensity IN ('low', 'medium', 'high')),\n    \n    -- App Logic & Workout Tracking\n    tracking_type TEXT NOT NULL DEFAULT 'weight_reps' CHECK(tracking_type IN (\n        'weight_reps', 'reps_only', 'time', 'distance_time', 'weight_time'\n    )),\n    is_unilateral INTEGER NOT NULL DEFAULT 0 CHECK(is_unilateral IN (0, 1)),\n    \n    -- Visual Assets & Media\n    media_url TEXT,\n    icon_url TEXT,\n    anatomy_diagram_url TEXT,\n    \n    -- Metadata\n    is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1)),\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+        },
+        "dim_routines": {
+            "row_count": 0,
+            "columns": [
+                {
+                    "column_id": 0,
+                    "name": "id",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": true
+                },
+                {
+                    "column_id": 1,
+                    "name": "user_id",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 2,
+                    "name": "name",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 3,
+                    "name": "description",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 4,
+                    "name": "is_active",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": "1",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 5,
+                    "name": "updated_at",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "CURRENT_TIMESTAMP",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 6,
+                    "name": "created_at",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "CURRENT_TIMESTAMP",
+                    "is_primary_key": false
+                }
+            ],
+            "foreign_keys": [
+                {
+                    "column": "user_id",
+                    "references_table": "dim_users",
+                    "references_column": "id",
+                    "on_update": "NO ACTION",
+                    "on_delete": "CASCADE"
+                }
+            ],
+            "indexes": [],
+            "ddl_sql": "CREATE TABLE dim_routines (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    name TEXT NOT NULL,\n    description TEXT,\n    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),\n    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES dim_users(id) ON DELETE CASCADE\n)"
+        },
+        "dim_users": {
+            "row_count": 0,
+            "columns": [
+                {
+                    "column_id": 0,
+                    "name": "id",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": true
+                },
+                {
+                    "column_id": 1,
+                    "name": "username",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 2,
+                    "name": "weight_unit",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "'kg'",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 3,
+                    "name": "created_at",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "CURRENT_TIMESTAMP",
+                    "is_primary_key": false
+                }
+            ],
+            "foreign_keys": [],
+            "indexes": [
+                {
+                    "name": "sqlite_autoindex_dim_users_1",
+                    "is_unique": true,
+                    "origin": "u",
+                    "columns": [
+                        "username"
+                    ]
+                }
+            ],
+            "ddl_sql": "CREATE TABLE dim_users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    username TEXT NOT NULL UNIQUE,\n    weight_unit TEXT NOT NULL DEFAULT 'kg' CHECK(weight_unit IN ('kg', 'lbs')),\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+        },
+        "fact_workout_sets": {
+            "row_count": 0,
+            "columns": [
+                {
+                    "column_id": 0,
+                    "name": "id",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": true
+                },
+                {
+                    "column_id": 1,
+                    "name": "user_id",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 2,
+                    "name": "routine_id",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 3,
+                    "name": "exercise_id",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 4,
+                    "name": "training_id",
+                    "type": "TEXT",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 5,
+                    "name": "exercise_order",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": "1",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 6,
+                    "name": "set_number",
+                    "type": "INTEGER",
+                    "not_null": true,
+                    "default_value": "1",
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 7,
+                    "name": "reps",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 8,
+                    "name": "weight",
+                    "type": "REAL",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 9,
+                    "name": "duration_seconds",
+                    "type": "INTEGER",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 10,
+                    "name": "distance_meters",
+                    "type": "REAL",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 11,
+                    "name": "rpe",
+                    "type": "REAL",
+                    "not_null": false,
+                    "default_value": null,
+                    "is_primary_key": false
+                },
+                {
+                    "column_id": 12,
+                    "name": "created_at",
+                    "type": "TEXT",
+                    "not_null": true,
+                    "default_value": "CURRENT_TIMESTAMP",
+                    "is_primary_key": false
+                }
+            ],
+            "foreign_keys": [
+                {
+                    "column": "exercise_id",
+                    "references_table": "dim_exercises",
+                    "references_column": "id",
+                    "on_update": "NO ACTION",
+                    "on_delete": "RESTRICT"
+                },
+                {
+                    "column": "routine_id",
+                    "references_table": "dim_routines",
+                    "references_column": "id",
+                    "on_update": "NO ACTION",
+                    "on_delete": "CASCADE"
+                },
+                {
+                    "column": "user_id",
+                    "references_table": "dim_users",
+                    "references_column": "id",
+                    "on_update": "NO ACTION",
+                    "on_delete": "CASCADE"
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "idx_fact_exercise_history",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "user_id",
+                        "exercise_id",
+                        "created_at"
+                    ]
+                },
+                {
+                    "name": "idx_fact_routine_template",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "routine_id",
+                        "training_id"
+                    ]
+                },
+                {
+                    "name": "idx_fact_user_training",
+                    "is_unique": false,
+                    "origin": "c",
+                    "columns": [
+                        "user_id",
+                        "training_id"
+                    ]
+                }
+            ],
+            "ddl_sql": "CREATE TABLE fact_workout_sets (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    \n    -- Foreign Keys pointing to Dimensions\n    user_id INTEGER NOT NULL,\n    routine_id INTEGER NOT NULL,\n    exercise_id INTEGER NOT NULL,\n    \n    -- Session & Ordering Identifiers\n    -- NULL = Routine Template | NOT NULL = Logged Historical Workout\n    training_id TEXT,\n    exercise_order INTEGER NOT NULL DEFAULT 1,\n    set_number INTEGER NOT NULL DEFAULT 1,\n    \n    -- Fact Metrics\n    reps INTEGER,\n    weight REAL,\n    duration_seconds INTEGER,\n    distance_meters REAL,\n    rpe REAL CHECK(rpe BETWEEN 1 AND 10),\n    \n    -- Timestamps\n    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \n    FOREIGN KEY (user_id) REFERENCES dim_users(id) ON DELETE CASCADE,\n    FOREIGN KEY (routine_id) REFERENCES dim_routines(id) ON DELETE CASCADE,\n    FOREIGN KEY (exercise_id) REFERENCES dim_exercises(id) ON DELETE RESTRICT\n)"
+        }
+    }
+}
