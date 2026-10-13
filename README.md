@@ -138,6 +138,97 @@ Run the routing tests from the repository root:
 PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_orchestrator.py -v
 ```
 
+## Routine Maker
+
+`backend/src/systems/routinemaker/RoutineMaker.py` implements the Gemini-backed
+routine workflow. Its four distinct system prompts are in
+`backend/src/config/prompts/routinemaker/routinemaker.yaml`:
+
+1. **Routing:** identify creation, follow-up answers, updates, or unrelated input
+   and extract explicitly provided requirements into validated JSON.
+2. **Parameter collection:** ask only for missing requirements.
+3. **Routine creation:** generate a plain-text routine once all requirements exist.
+4. **Routine update:** revise a supplied routine and summarize the changes.
+
+The class delegates to `backend/src/utils/routinemaker/`, with one utility
+function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
+Shared parameter and result models live in `models.py` and remain importable
+from `systems.routinemaker.RoutineMaker` for compatibility.
+
+These are conditional stages, not four requests on every turn. Routine requests
+make one routing call followed by one collection, creation, or update call;
+unrelated input makes only the routing call. Requirements are `routine_type`
+(`weider` or `ppl`), `days_per_week` (1-7), `hours_per_session` (positive, at most
+24), and `level` (`beginner`, `intermediate`, or `advanced`). The routing prompt
+normalizes English/Spanish terms, accepts PPPL as a PPL typo, and converts
+session minutes to hours. Missing or ambiguous requirements are not guessed.
+Routine output is plain text for now, not a structured exercise schema.
+
+```python
+from systems.routinemaker.RoutineMaker import RoutineMaker
+
+maker = RoutineMaker()
+result = maker.handle("Make me a PPL routine", language="EN")
+print(result.message)  # Questions for the remaining requirements.
+
+result = maker.handle(
+    "Three days a week, one hour per session, beginner",
+    parameters=result.parameters,
+    routine=result.routine,
+    language="EN",
+)
+print(result.routine)
+
+result = maker.handle(
+    "Change it to four days a week",
+    parameters=result.parameters,
+    routine=result.routine,
+    language="EN",
+)
+print(result.message)
+```
+
+Conversation state belongs to the caller: pass the previous result's
+`parameters` and `routine` on each follow-up, keeping them separate per user.
+Parameter updates merge with known values. Explicitly invalid or ambiguous
+replacement requirements clear the previous value and trigger a question rather
+than silently reusing it. Results expose `status`
+(`needs_parameters`, `created`, `updated`, or `no_match`), validated `parameters`,
+user-facing `message`, and `routine`. Collection and unrelated requests preserve
+the existing routine. Updates require a non-empty existing routine; absent
+routine state raises `ValueError`. `language` accepts `EN` and `ES`.
+
+`RoutineMaker(client=existing_client, prompt_path=custom_yaml)` supports client
+injection and alternate prompts. The default client reads the same Gemini
+configuration as the orchestrator but uses a 4096-token output budget for longer
+routine responses; injected clients retain their own settings. Prompt loading is
+independent of the working directory. Invalid requests or model responses,
+configuration errors, and API failures propagate without silent fallbacks.
+No HTTP endpoint or automatic orchestrator dispatch is added.
+
+Run the live Routine Maker smoke test from the repository root, using the same
+Gemini configuration as the orchestrator:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "Make me a Weider routine" --language ES
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "One hour per session, beginner" --parameters '{"routine_type":"ppl","days_per_week":3}'
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "Change to four days a week" --routine-file routine.txt --parameters '{"routine_type":"ppl","days_per_week":3,"hours_per_session":1,"level":"beginner"}'
+```
+
+The default query supplies all four requirements for routine creation. The script
+prints the result status, collected parameters as JSON, and the routine or
+follow-up message. For later turns, copy the printed JSON into `--parameters`;
+for updates, save the routine text in a UTF-8 file and pass `--routine-file`.
+Each invocation handles one turn and makes real API calls; usage and quota apply.
+Errors go to stderr and return exit status 1; HTTP error bodies redact the API key.
+
+Run the mocked workflow tests without API calls:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_routine_maker.py -v
+```
+
 ## Gemini text smoke test
 
 `backend/src/utils/general/GeminiApiCall.py` provides the reusable `GeminiClient`
