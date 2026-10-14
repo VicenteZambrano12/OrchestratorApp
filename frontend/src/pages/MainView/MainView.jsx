@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Activity, ArrowRight, ArrowUp, CheckCheck,
   ChevronRight, CircleHelp, Dumbbell, Flame,
-  MessageSquare, Plus, RotateCcw, Sparkles, X,
+  AlertCircle, MessageSquare, Plus, RotateCcw, Sparkles, X,
 } from 'lucide-react'
 import BrandMark from '../../components/BrandMark/BrandMark'
 import Pipeline from '../../components/Pipeline/Pipeline'
@@ -71,6 +71,7 @@ function MainView() {
   const [saved, setSaved] = useState(false)
   const [help, setHelp] = useState(false)
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [lastQuery, setLastQuery] = useState('')
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
@@ -104,11 +105,19 @@ function MainView() {
     setTab('routine')
   }
 
-  async function sendMessage(event) {
+  function sendMessage(event) {
     event.preventDefault()
     if (!input.trim() || pending) return
-    const query = input.trim()
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: query }])
+    submitQuery(input.trim())
+  }
+
+  function retryLast() {
+    if (lastQuery && !pending) submitQuery(lastQuery, true)
+  }
+
+  async function submitQuery(query, isRetry = false) {
+    setLastQuery(query)
+    if (!isRetry) setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: query }])
     setInput('')
     setPending(true)
     setError('')
@@ -120,7 +129,7 @@ function MainView() {
     } catch (requestError) {
       if (requestError.backendDown) setBackendDown(true)
       else if (requestError.name !== 'AbortError') setError(`${requestError.message} Your message was not answered. You can retry it below.`)
-      setInput(query)
+      if (!isRetry) setInput(query)
     } finally {
       setPending(false)
     }
@@ -132,6 +141,7 @@ function MainView() {
     setSessionId(crypto.randomUUID())
     setInput('')
     setError('')
+    setLastQuery('')
   }
 
   if (backendDown) return <FailingView onRetry={() => setBackendDown(false)} />
@@ -140,7 +150,7 @@ function MainView() {
     <aside className="sidebar">
       <a className="brand" href="#chat" onClick={() => setTab('chat')}><BrandMark /><span>form<span className="brand-period">.</span></span></a>
       <div className="workspace-label">YOUR PERSONAL COACH</div>
-      <nav aria-label="Main navigation"><button className={tab === 'chat' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('chat')}><MessageSquare size={19} />AI Chat<span className="nav-active-dot" /></button><button className={tab === 'routine' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('routine')}><Dumbbell size={19} />My Routine<span className="nav-active-dot" /></button></nav>
+      <nav aria-label="Main navigation"><button className={tab === 'chat' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'chat' ? 'page' : undefined} onClick={() => setTab('chat')}><MessageSquare size={19} />AI Chat<span className="nav-active-dot" /></button><button className={tab === 'routine' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'routine' ? 'page' : undefined} onClick={() => setTab('routine')}><Dumbbell size={19} />My Routine<span className="nav-active-dot" /></button></nav>
       <button className="new-chat" onClick={() => { newChat(); setTab('chat') }} disabled={pending}><Plus size={17} />New conversation</button>
       <div className="sidebar-note"><span className="note-symbol"><Activity size={22} /></span><h4>Better together.</h4><p>Your goals. Our intelligence.<br />A stronger you.</p><div className="note-line"><span /><span /><span /></div></div>
       <div className="sidebar-bottom"><button className="help-button" onClick={() => setHelp(true)}><CircleHelp size={18} />A little guidance<ArrowRight size={15} /></button><div className="profile"><span className="avatar">JD</span><div><strong>Jamie Davis</strong><span>Your fitness journey</span></div><span className="profile-status" /></div></div>
@@ -152,7 +162,7 @@ function MainView() {
           <div className="chat-intro"><div className="intro-kicker"><Sparkles size={15} /> A LITTLE GUIDANCE. A LOT OF POTENTIAL.</div><h1>Your goals. A smarter plan<span>.</span></h1><p>Meet your AI coach. Built to understand you, designed to move you forward.</p></div>
           <div className="conversation-header"><span><span className="status-dot" />{messages.length ? 'Let’s build your next chapter' : 'A fresh start'}</span><button className="icon-button" aria-label="Start a new conversation" title="Start a new conversation" onClick={newChat} disabled={pending}><RotateCcw size={15} /></button></div>
           <div className="conversation" aria-live="polite" aria-busy={pending}>
-            {messages.length === 0 && <div className="empty-chat"><BrandMark /><h2>Good things start with a conversation.</h2><p>Tell me what you&apos;re working toward, or pick a prompt below.</p></div>}
+            {messages.length === 0 && <div className="empty-chat"><BrandMark /><h2>Good things start with a conversation.</h2><p>Tell me what you&apos;re working toward, or pick a prompt below.</p><button type="button" className="primary-button" onClick={() => askCoach('Create a 3-day push/pull/legs routine for an intermediate lifter, with 1 hour per session.')}><Dumbbell size={16} aria-hidden="true" />Build my routine</button></div>}
             {messages.map((message) => <article className={`message ${message.role}`} key={message.id}>
               <div className="message-avatar">{message.role === 'assistant' ? <BrandMark small /> : <span className="avatar">JD</span>}</div>
               <div className="message-body"><div className="message-heading"><strong>{message.role === 'assistant' ? 'Form coach' : 'You'}</strong><span>{message.role === 'assistant' ? <><span className="ai-label">AI</span>{message.demo && 'Example response'}</> : 'Just now'}</span></div>
@@ -164,7 +174,7 @@ function MainView() {
             {pending && <article className="message assistant"><div className="message-avatar"><BrandMark small /></div><div className="message-body"><div className="message-heading"><strong>Form coach</strong><span>Working on it…</span></div><Pipeline pending demo={false} /></div></article>}
             <div ref={bottomRef} />
           </div>
-          {error && <div className="error-message" role="alert">{error}</div>}
+          {error && <div className="error-message" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span>{lastQuery && <button type="button" className="retry-button" disabled={pending} onClick={() => retryLast()}><RotateCcw size={14} aria-hidden="true" />Retry</button>}</div>}
           <div className="composer-area"><div className="suggestions"><button onClick={() => askCoach('Create a 3-day push/pull/legs routine for an intermediate lifter, with 1 hour per session.')} disabled={pending}><Dumbbell size={14} />Build my routine</button><button onClick={() => askCoach('Explain how to do a Romanian deadlift.')} disabled={pending}><Activity size={14} />Explain an exercise</button><button onClick={() => askCoach('Analyze my progress. What workout details should I share?')} disabled={pending}><Flame size={14} />Review my progress</button></div>
             <form className="composer" onSubmit={sendMessage}><textarea ref={inputRef} aria-label="Message your AI coach" placeholder="A goal, a question, a fresh start. What’s on your mind?" value={input} onChange={(event) => setInput(event.target.value)} disabled={pending} rows={2} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form.requestSubmit() } }} /><div className="composer-bottom"><span><Sparkles size={14} />Your goals, expertly orchestrated</span><div><span className="enter-hint">Enter to send</span><button type="submit" className="send-button" aria-label="Send message" disabled={!input.trim() || pending}><ArrowUp size={20} /></button></div></div></form>
             <p className="composer-disclaimer">AI is a guide, not a substitute for professional advice. Listen to your body.</p>

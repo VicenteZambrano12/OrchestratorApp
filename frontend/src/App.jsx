@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AppSkeleton from './components/AppSkeleton/AppSkeleton'
 import MainView from './pages/MainView/MainView'
 import FailingView from './pages/FailingView/FailingView'
 import { checkHealth } from './hooks/health/health'
@@ -17,7 +18,7 @@ function App() {
     return () => controller.abort()
   }, [attempt])
 
-  if (status === 'checking') return null
+  if (status === 'checking') return <AppSkeleton />
   if (status === 'failed') return <FailingView onRetry={() => { setStatus('checking'); setAttempt((n) => n + 1) }} />
   return <MainView />
 }
