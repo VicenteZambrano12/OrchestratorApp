@@ -16,7 +16,7 @@ from api.DataClasses.pipeline.ChatRequest import ChatRequest
 from api.DataClasses.pipeline.ChatResponse import ChatResponse
 from api.documentation import load_app_documentation
 from app import app
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
+from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 
 
 class OpenAPITests(unittest.TestCase):

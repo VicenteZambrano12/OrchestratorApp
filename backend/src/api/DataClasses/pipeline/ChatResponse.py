@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from utils.pipeline.models import SubsystemId
-from utils.routinemaker.models import RoutineMakerResult
+from utils.pipeline.dataclass.models import SubsystemId
+from utils.routinemaker.dataclass.models import RoutineMakerResult
 
 
 class ChatResponse(BaseModel):

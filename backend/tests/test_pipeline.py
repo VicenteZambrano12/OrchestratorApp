@@ -6,8 +6,9 @@ from systems.orch.Orchestrator import Orchestrator
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from systems.pipeline.Pipeline import Pipeline
 from systems.routinemaker.RoutineMaker import RoutineMaker
-from utils.pipeline.models import PipelineResult
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
+from utils.pipeline.dataclass.models import PipelineResult
+from utils.pipeline.func.handle_with_subsystem import handle_with_subsystem
+from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 
 
 class PipelineTests(unittest.TestCase):
@@ -22,6 +23,19 @@ class PipelineTests(unittest.TestCase):
             "past_routines_analyzer": self.past_routines_analyzer,
         }
         self.pipeline = Pipeline(self.orchestrator, **self.systems)
+
+    def test_execution_utility_returns_selected_subsystem_and_response(self):
+        self.orchestrator.route.return_value = "exercise_explainer"
+        result = handle_with_subsystem(self.pipeline, "Explain squats", "ES")
+        self.assertIsInstance(result, PipelineResult)
+        self.assertEqual(result.subsystem, "exercise_explainer")
+        self.assertIs(result.response, self.exercise_explainer.handle.return_value)
+        self.orchestrator.route.assert_called_once_with(
+            {"query": "Explain squats"}, language="ES"
+        )
+        self.exercise_explainer.handle.assert_called_once_with(
+            "Explain squats", language="ES"
+        )
 
     def test_returns_selected_subsystem_and_unchanged_response_after_routing_once(self):
         for target, system in self.systems.items():
@@ -139,11 +153,11 @@ class PipelineTests(unittest.TestCase):
                 selector = Mock(return_value="no_system")
                 pipeline = Pipeline(Orchestrator(selector))
                 with patch(
-                    "systems.pipeline.Pipeline.RoutineMaker"
+                    "utils.pipeline.func.handle_with_subsystem.RoutineMaker"
                 ) as routine_maker, patch(
-                    "systems.pipeline.Pipeline.ExerciseExplainer"
+                    "utils.pipeline.func.handle_with_subsystem.ExerciseExplainer"
                 ) as explainer, patch(
-                    "systems.pipeline.Pipeline.PastRoutinesAnalyzer"
+                    "utils.pipeline.func.handle_with_subsystem.PastRoutinesAnalyzer"
                 ) as analyzer:
                     self.assertEqual(
                         pipeline.handle("What is the capital of Japan?", language),
@@ -168,29 +182,36 @@ class PipelineTests(unittest.TestCase):
             ("Explain squats", None), ("Explain squats", ["EN"]),
         ):
             with self.subTest(query=query, language=language), patch(
-                "systems.pipeline.Pipeline.Orchestrator.from_gemini"
+                "utils.pipeline.func.handle_with_subsystem.Orchestrator.from_gemini"
             ) as factory:
                 with self.assertRaises(ValueError):
                     Pipeline().handle(query, language)
                 factory.assert_not_called()
 
     def test_default_dependencies_are_created_lazily_and_reused(self):
-        orchestrator = Orchestrator(Mock(return_value="exercise_explainer"))
-        with patch(
-            "systems.pipeline.Pipeline.Orchestrator.from_gemini",
-            return_value=orchestrator,
-        ) as factory, patch(
-            "systems.pipeline.Pipeline.ExerciseExplainer",
-            return_value=self.exercise_explainer,
-        ) as explainer:
-            pipeline = Pipeline()
-            factory.assert_not_called()
-            explainer.assert_not_called()
-            pipeline.handle("Explain squats", "ES")
-            pipeline.handle("Explain bench press", "EN")
-            factory.assert_called_once_with()
-            explainer.assert_called_once_with()
-            self.assertEqual(self.exercise_explainer.handle.call_count, 2)
+        for target, class_name in (
+            ("routine_maker", "RoutineMaker"),
+            ("exercise_explainer", "ExerciseExplainer"),
+            ("past_routines_analyzer", "PastRoutinesAnalyzer"),
+        ):
+            with self.subTest(target=target):
+                system = self.systems[target]
+                orchestrator = Orchestrator(Mock(return_value=target))
+                with patch(
+                    "utils.pipeline.func.handle_with_subsystem.Orchestrator.from_gemini",
+                    return_value=orchestrator,
+                ) as factory, patch(
+                    f"utils.pipeline.func.handle_with_subsystem.{class_name}",
+                    return_value=system,
+                ) as system_factory:
+                    pipeline = Pipeline()
+                    factory.assert_not_called()
+                    system_factory.assert_not_called()
+                    pipeline.handle("My first workout question", "ES")
+                    pipeline.handle("My second workout question", "EN")
+                    factory.assert_called_once_with()
+                    system_factory.assert_called_once_with()
+                    self.assertEqual(system.handle.call_count, 2)
 
     def test_unknown_target_raises_without_calling_any_system(self):
         self.orchestrator.route.return_value = "custom_system"

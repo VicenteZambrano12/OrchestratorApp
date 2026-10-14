@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 
 class RoutineParameters(BaseModel):
@@ -45,6 +45,20 @@ class RoutineParameters(BaseModel):
         return tuple(
             name for name, value in self.model_dump().items() if value is None
         )
+
+
+class _RoutingDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Literal["create", "update", "no_match"]
+    parameters: RoutineParameters
+    message: StrictStr
+
+    @model_validator(mode="after")
+    def validate_no_match_message(self) -> "_RoutingDecision":
+        if self.intent == "no_match" and not self.message.strip():
+            raise ValueError("no_match requires a non-empty message")
+        return self
 
 
 @dataclass(frozen=True)

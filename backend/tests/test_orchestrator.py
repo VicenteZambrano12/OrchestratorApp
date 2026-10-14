@@ -10,11 +10,11 @@ from pydantic import ValidationError
 
 from systems.orch.Orchestrator import Orchestrator
 from utils.general.GeminiApiCall import GeminiClient
-from utils.orch.create_chat_selector import create_chat_selector
-from utils.orch.create_gemini_chat_model import create_gemini_chat_model
-from utils.orch.no_system_message import no_system_message
-from utils.orch.resolve_systems_path import resolve_systems_path
-from utils.orch.route import route
+from utils.orch.func.create_chat_selector import create_chat_selector
+from utils.orch.func.create_gemini_chat_model import create_gemini_chat_model
+from utils.orch.func.no_system_message import no_system_message
+from utils.orch.func.resolve_systems_path import resolve_systems_path
+from utils.orch.func.route import route
 
 
 SMOKE_SCRIPT = (
@@ -347,7 +347,7 @@ class OrchestratorTests(unittest.TestCase):
         )
 
     def test_gemini_default_client_is_created_once(self):
-        with patch("utils.orch.create_gemini_chat_model.GeminiClient") as create_client:
+        with patch("utils.orch.func.create_gemini_chat_model.GeminiClient") as create_client:
             create_client.return_value.generate.return_value = "coding"
             orchestrator = Orchestrator.from_gemini()
             orchestrator.route(self.payload)

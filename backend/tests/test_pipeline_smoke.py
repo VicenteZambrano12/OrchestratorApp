@@ -8,7 +8,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from utils.general.GeminiApiCall import GeminiClient
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
+from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 
 
 SMOKE_SCRIPT = (

@@ -9,7 +9,7 @@ def load_prompts(prompt_path: str | Path | None = None) -> dict[str, str]:
     path = (
         Path(prompt_path)
         if prompt_path is not None
-        else Path(__file__).resolve().parents[2]
+        else Path(__file__).resolve().parents[3]
         / "config/prompts/past_routines_analyzer/past_routines_analyzer.yaml"
     )
     prompts = yaml.safe_load(path.read_text(encoding="utf-8"))

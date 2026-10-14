@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from utils.routinemaker.models import RoutineMakerResult
+from utils.routinemaker.dataclass.models import RoutineMakerResult
 
 
 SubsystemId = Literal[

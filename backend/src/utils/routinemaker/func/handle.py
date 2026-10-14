@@ -1,23 +1,11 @@
 from collections.abc import Callable, Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
-
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
-
-
-class _RoutingDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    intent: Literal["create", "update", "no_match"]
-    parameters: RoutineParameters
-    message: StrictStr
-
-    @model_validator(mode="after")
-    def validate_no_match_message(self) -> "_RoutingDecision":
-        if self.intent == "no_match" and not self.message.strip():
-            raise ValueError("no_match requires a non-empty message")
-        return self
+from utils.routinemaker.dataclass.models import (
+    RoutineMakerResult,
+    RoutineParameters,
+    _RoutingDecision,
+)
 
 
 def handle(

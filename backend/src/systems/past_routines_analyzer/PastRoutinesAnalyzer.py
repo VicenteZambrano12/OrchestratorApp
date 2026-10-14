@@ -3,9 +3,9 @@
 from pathlib import Path
 
 from utils.general.GeminiApiCall import GeminiClient
-from utils.past_routines_analyzer.generate import generate
-from utils.past_routines_analyzer.handle import handle
-from utils.past_routines_analyzer.load_prompts import load_prompts
+from utils.past_routines_analyzer.func.generate import generate
+from utils.past_routines_analyzer.func.handle import handle
+from utils.past_routines_analyzer.func.load_prompts import load_prompts
 
 
 class PastRoutinesAnalyzer:

@@ -14,10 +14,10 @@ from systems.routinemaker.RoutineMaker import (
     RoutineParameters,
 )
 from utils.general.GeminiApiCall import GeminiClient
-from utils.routinemaker.generate import generate
-from utils.routinemaker.handle import handle
-from utils.routinemaker.load_prompts import load_prompts
-from utils.routinemaker.models import (
+from utils.routinemaker.func.generate import generate
+from utils.routinemaker.func.handle import handle
+from utils.routinemaker.func.load_prompts import load_prompts
+from utils.routinemaker.dataclass.models import (
     RoutineMakerResult as UtilityResult,
     RoutineParameters as UtilityParameters,
 )

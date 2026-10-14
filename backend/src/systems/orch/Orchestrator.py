@@ -3,11 +3,11 @@ from pathlib import Path
 from typing import Any
 
 from utils.general.GeminiApiCall import GeminiClient
-from utils.orch.create_chat_selector import create_chat_selector
-from utils.orch.create_gemini_chat_model import create_gemini_chat_model
-from utils.orch.no_system_message import no_system_message
-from utils.orch.resolve_systems_path import resolve_systems_path
-from utils.orch.route import route
+from utils.orch.func.create_chat_selector import create_chat_selector
+from utils.orch.func.create_gemini_chat_model import create_gemini_chat_model
+from utils.orch.func.no_system_message import no_system_message
+from utils.orch.func.resolve_systems_path import resolve_systems_path
+from utils.orch.func.route import route
 
 
 class Orchestrator:

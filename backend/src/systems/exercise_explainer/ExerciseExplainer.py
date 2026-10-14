@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from utils.exercise_explainer.generate import generate
-from utils.exercise_explainer.handle import handle
-from utils.exercise_explainer.load_prompts import load_prompts
+from utils.exercise_explainer.func.generate import generate
+from utils.exercise_explainer.func.handle import handle
+from utils.exercise_explainer.func.load_prompts import load_prompts
 from utils.general.GeminiApiCall import GeminiClient
 
 

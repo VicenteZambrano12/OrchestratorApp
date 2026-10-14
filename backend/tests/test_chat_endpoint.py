@@ -6,8 +6,8 @@ from api.Endpoint.chat import get_pipeline
 from app import app
 from systems.orch.Orchestrator import Orchestrator
 from systems.pipeline.Pipeline import Pipeline
-from utils.pipeline.models import PipelineResult
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
+from utils.pipeline.dataclass.models import PipelineResult
+from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 
 
 class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):

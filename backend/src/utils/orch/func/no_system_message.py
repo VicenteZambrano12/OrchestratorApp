@@ -9,7 +9,7 @@ def no_system_message(language: str = "EN") -> str:
 	if language not in ("ES", "EN"):
 		raise ValueError("language must be ES (Spanish) or EN (English)")
 	path = (
-		Path(__file__).resolve().parents[2]
+		Path(__file__).resolve().parents[3]
 		/ "config/prompts/nosystem/nosystem.yaml"
 	)
 	try:

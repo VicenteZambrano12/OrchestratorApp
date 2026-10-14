@@ -6,8 +6,9 @@ from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from systems.orch.Orchestrator import Orchestrator
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from systems.routinemaker.RoutineMaker import RoutineMaker
-from utils.pipeline.models import PipelineResult
-from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
+from utils.pipeline.dataclass.models import PipelineResult
+from utils.pipeline.func.handle_with_subsystem import handle_with_subsystem
+from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 
 
 class Pipeline:
@@ -64,43 +65,11 @@ class Pipeline:
         lazy and reusable; routine state and history remain caller-owned.
         Validation, routing, provider, and system failures propagate unchanged.
         """
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError("query must be a non-empty string")
-        if language not in ("ES", "EN"):
-            raise ValueError("language must be ES (Spanish) or EN (English)")
-
-        if self._orchestrator is None:
-            self._orchestrator = Orchestrator.from_gemini()
-        target = self._orchestrator.route({"query": query}, language=language)
-
-        if target == "no_system":
-            return PipelineResult(
-                subsystem="no_system",
-                response=self._orchestrator.no_system_message(language),
-            )
-        if target == "routine_maker":
-            if self._routine_maker is None:
-                self._routine_maker = RoutineMaker()
-            return PipelineResult(
-                subsystem="routine_maker",
-                response=self._routine_maker.handle(
-                    query, parameters=parameters, routine=routine, language=language
-                ),
-            )
-        if target == "exercise_explainer":
-            if self._exercise_explainer is None:
-                self._exercise_explainer = ExerciseExplainer()
-            return PipelineResult(
-                subsystem="exercise_explainer",
-                response=self._exercise_explainer.handle(query, language=language),
-            )
-        if target == "past_routines_analyzer":
-            if self._past_routines_analyzer is None:
-                self._past_routines_analyzer = PastRoutinesAnalyzer()
-            return PipelineResult(
-                subsystem="past_routines_analyzer",
-                response=self._past_routines_analyzer.handle(
-                    query, history=history, language=language
-                ),
-            )
-        raise ValueError(f"unsupported pipeline subsystem id: {target}")
+        return handle_with_subsystem(
+            self,
+            query,
+            language,
+            parameters=parameters,
+            routine=routine,
+            history=history,
+        )

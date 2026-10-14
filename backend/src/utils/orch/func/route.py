@@ -3,18 +3,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, StrictStr, ValidationError, ValidationInfo, field_validator
+from pydantic import ValidationError
 
-
-class _RoutingSelection(BaseModel):
-	selected_id: StrictStr
-
-	@field_validator("selected_id")
-	@classmethod
-	def validate_selected_id(cls, value: str, info: ValidationInfo) -> str:
-		if info.context is None or value not in info.context["allowed_ids"]:
-			raise ValueError("selection must be exactly one allowed routing id")
-		return value
+from utils.orch.dataclass.models import _RoutingSelection
 
 
 def route(

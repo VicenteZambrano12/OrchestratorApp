@@ -9,10 +9,10 @@ from pydantic import ValidationError
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from systems.routinemaker.RoutineMaker import RoutineMaker
-from utils.exercise_explainer.generate import generate as generate_exercise
+from utils.exercise_explainer.func.generate import generate as generate_exercise
 from utils.general.GeminiApiCall import GeminiClient
-from utils.past_routines_analyzer.generate import generate as generate_history
-from utils.routinemaker.generate import generate as generate_routine
+from utils.past_routines_analyzer.func.generate import generate as generate_history
+from utils.routinemaker.func.generate import generate as generate_routine
 
 
 CLIENT_MODULE = "utils.general.GeminiApiCall"
