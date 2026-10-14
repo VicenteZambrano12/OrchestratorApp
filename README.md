@@ -138,6 +138,114 @@ Run the routing tests from the repository root:
 PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_orchestrator.py -v
 ```
 
+## Exercise Explainer
+
+`backend/src/systems/exercise_explainer/ExerciseExplainer.py` provides a simple
+two-call Gemini workflow with prompts in
+`backend/src/config/prompts/exercise_explainer/exercise_explainer.yaml`.
+The first call extracts an explicitly named exercise or list of exercises.
+If none are named, it returns a request for names without a second call.
+Otherwise, the second call explains each exercise's muscles, setup, execution,
+breathing, common mistakes, and safety tips.
+
+```python
+from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
+
+explainer = ExerciseExplainer()
+explanation = explainer.handle("Explain squats and bench press", language="EN")
+```
+
+`handle()` returns plain text and accepts `EN` (default) or `ES`. As with
+Routine Maker, configure `GEMINI_API_KEY` and optionally `LLM_MODEL` in `.env`,
+and put `backend/src` on `PYTHONPATH`. The constructor accepts an existing
+`GeminiClient` and a custom `prompt_path`. Invalid input, malformed model output,
+configuration errors, and provider failures propagate to the caller.
+Orchestrator routing does not automatically execute this class.
+
+To run the live functional test from the repository root:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain how to perform a squat." --language EN
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain squats and bench press." --language EN
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explica la sentadilla." --language ES
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain an exercise." --language EN
+```
+
+The positional query is optional and defaults to a squat explanation.
+`--language` defaults to `EN`. The last example tests missing exercise names
+and should print a request for names rather than an explanation.
+The script makes real Gemini requests using `.env`; API usage and quota apply.
+It prints the response on success, or errors to stderr with exit status 1.
+
+Run the mocked tests without API calls:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_exercise_explainer.py -v
+```
+
+## Past Routines Analyzer
+
+`backend/src/systems/past_routines_analyzer/PastRoutinesAnalyzer.py` analyzes
+caller-supplied workout history using the existing `GeminiClient`. Its prompts
+are in `backend/src/config/prompts/past_routines_analyzer/past_routines_analyzer.yaml`.
+The first call checks whether the query concerns past workouts and whether the
+history supports an answer. Missing or insufficient history returns a request
+for records; unrelated queries return a no-match message. These use one call.
+Otherwise, the second call summarizes or compares the supplied records, with
+instructions to explain missing data rather than invent progress or metrics.
+
+```python
+from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
+
+analyzer = PastRoutinesAnalyzer()
+analysis = analyzer.handle(
+    "Compare my squat progress",
+    history=(
+        "2026-10-01: Squat, 3 sets of 8 reps each at 60 kg.\n"
+        "2026-10-08: Squat, 3 sets of 8 reps each at 65 kg."
+    ),
+    language="EN",
+)
+```
+
+`handle()` returns plain text. `history` is optional text, including serialized
+JSON, not a file path; use `None` when no records are available. Empty or non-text
+history raises `ValueError`. `language` accepts `EN` (default) or `ES`.
+The constructor accepts an existing client and a custom `prompt_path`.
+Invalid input/output, configuration errors, and provider failures propagate.
+There is no database access or automatic subsystem execution by the orchestrator.
+
+To run the live functional test from the repository root, use the included
+synthetic sample in `scripts_manual_func_tests/fixtures/past_routines_history.txt`:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_past_routines_analyzer.py "Compare my squat progress" --history-file scripts_manual_func_tests/fixtures/past_routines_history.txt --language EN
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_past_routines_analyzer.py "Analiza mi progreso" --history-file scripts_manual_func_tests/fixtures/past_routines_history.txt --language ES
+```
+
+The sample contains two squat sessions with the same sets and repetitions at
+60 kg and 65 kg. For your own records, replace the `--history-file` path with
+an existing UTF-8 file; relative paths are resolved from the working directory.
+
+To test missing history, omit `--history-file`:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_past_routines_analyzer.py "Analyze my past workouts" --language EN
+```
+
+The query is optional and defaults to a workout summary and progress request.
+The history file can be plain text or JSON; its contents are passed as text.
+The script sends the query and history to Gemini using your root `.env`
+configuration (`GEMINI_API_KEY`, optional `LLM_MODEL`); use only records you
+intend to share with that provider. API usage and quota apply.
+It prints the response or reports errors to stderr with exit status 1.
+
+Run the mocked tests without API calls:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_past_routines_analyzer.py -v
+```
+
 ## Routine Maker
 
 `backend/src/systems/routinemaker/RoutineMaker.py` implements the Gemini-backed

@@ -1,0 +1,16 @@
+Synthetic workout history for functional testing, not real user records.
+All weights are in kilograms. Repetitions are per set.
+
+2026-10-01:
+Routine: Lower body
+Exercise: Barbell squat
+Sets: 3
+Reps per set: 8
+Weight per set: 60 kg
+
+2026-10-08:
+Routine: Lower body
+Exercise: Barbell squat
+Sets: 3
+Reps per set: 8
+Weight per set: 65 kg
