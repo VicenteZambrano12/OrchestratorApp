@@ -8,6 +8,46 @@ A responsive React + Vite mockup for OrchestratorApp, with two views:
   in kilograms, and exercise completion. Changes and saved coach recommendations
   persist in this browser's local storage; they are not synchronized to a server.
 
+## Page structure
+
+All JavaScript source modules under `src/` use the `.jsx` extension, including
+feature hooks, helpers, and API modules. Tool configuration files retain `.js`.
+
+[`App.jsx`](src/App.jsx) is the application entry component and renders
+[`MainView.jsx`](src/pages/MainView/MainView.jsx). MainView owns the app layout,
+chat state, routine persistence, and help dialog, and imports five components
+from `src/components/`, each in its own folder:
+
+- [`BrandMark`](src/components/BrandMark/BrandMark.jsx)
+- [`Pipeline`](src/components/Pipeline/Pipeline.jsx)
+- [`RoutinePreview`](src/components/RoutinePreview/RoutinePreview.jsx)
+- [`TrainingPanel`](src/components/TrainingPanel/TrainingPanel.jsx)
+- [`RoutineView`](src/components/RoutineView/RoutineView.jsx)
+
+Each component imports its logic from a matching folder under `src/features/`,
+with a subfolder per feature:
+
+```text
+src/features/
+|-- BrandMark/
+|   `-- appearance/
+|-- Pipeline/
+|   |-- expansion/
+|   `-- request-status/
+|-- RoutinePreview/
+|   `-- plan-summary/
+|-- TrainingPanel/
+|   `-- weekly-progress/
+`-- RoutineView/
+    |-- workout-editing/
+    `-- workout-completion/
+```
+
+The feature modules contain appearance configuration, pipeline stage selection
+and expansion, plan summaries, weekly progress, and workout editing/completion.
+Components retain their JSX and callbacks to MainView. Chat API and subsystem
+renderer modules remain under `src/features/ai-chat/`.
+
 ## Run
 
 ```sh
