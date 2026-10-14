@@ -32,3 +32,7 @@ def get_set_turn() -> SetTurn:
 
 def get_n_turns() -> GetNTurns:
     return GetNTurns(_redis_client)
+
+
+def get_routine_store() -> RedisClient:
+    return _redis_client

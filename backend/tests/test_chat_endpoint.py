@@ -8,6 +8,12 @@ from systems.orch.Orchestrator import Orchestrator
 from systems.pipeline.Pipeline import Pipeline
 from utils.pipeline.dataclass.models import PipelineResult
 from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
+from utils.exercise_explainer.dataclass.models import ExerciseExplanation
+from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
+from utils.general.GeminiApiCall import GeminiClient
+from systems.routinemaker.RoutineMaker import RoutineMaker
+from api.redis_deps import GetNTurns, SetTurn
+import test_routine_maker as routine_fixtures
 
 
 class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -20,6 +26,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(app.dependency_overrides.pop, get_pipeline)
 
     async def request(self, method, path, payload=None, expected_error=None):
+        path, _, query = path.partition("?")
         body = json.dumps(payload).encode("utf-8") if payload is not None else b""
         messages = []
 
@@ -38,7 +45,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "scheme": "http",
                 "path": path,
                 "raw_path": path.encode("utf-8"),
-                "query_string": b"",
+                "query_string": query.encode("utf-8"),
                 "headers": [(b"content-type", b"application/json")],
                 "client": ("127.0.0.1", 12345),
                 "server": ("testserver", 80),
@@ -111,8 +118,111 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "parameters": parameters.model_dump(),
                 "message": "What is your level?",
                 "routine": None,
+                "routine_id": None,
             },
         })
+
+    async def test_returns_original_exercise_fields_and_generated_explanation(self):
+        exercise = ExerciseExplanation(
+            id=1, name="Barbell Bench Press", description=" Original \n",
+            instructions="1. Setup.\n2. Press.", icon_url=None,
+            anatomy_diagram_url="database/images/anatomy/anatomy_chest.svg",
+            media_urls=["database/images/media/Press/0.jpg", "database/images/media/Press/1.jpg"],
+            llm_explanation="Keep control. Which step needs more detail?",
+        )
+        self.pipeline.handle_with_subsystem.return_value = PipelineResult(
+            subsystem="exercise_explainer", response=[exercise],
+        )
+        status, result = await self.request(
+            "POST", self.chat_path, {"query": "Explain bench", "language": "EN"}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["response"], [exercise.model_dump()])
+
+    async def test_routine_parameters_preview_and_confirmation_survive_http_requests(self):
+        fixture = routine_fixtures.RoutineMakerTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.client.generate.side_effect = [
+            routine_fixtures.decision(parameters={"routine_type": "ppl"}),
+            "How many days, how long and what level?",
+            routine_fixtures.decision(parameters={
+                "days_per_week": 3, "hours_per_session": 1.0, "level": "beginner",
+            }),
+            json.dumps(routine_fixtures.plan()),
+            routine_fixtures.decision("save"),
+        ]
+        orchestrator = Mock(spec=Orchestrator)
+        orchestrator.route.return_value = "routine_maker"
+
+        def pipeline():
+            return Pipeline(
+                orchestrator,
+                routine_maker=RoutineMaker(
+                    fixture.client, database_path=fixture.database, state_store=fixture.store,
+                ),
+                turn_setter=SetTurn(fixture.store), turn_getter=GetNTurns(fixture.store),
+            )
+
+        app.dependency_overrides[get_pipeline] = pipeline
+        for query, outcome in (
+            ("Make a PPL routine", "needs_parameters"),
+            ("Three days, one hour, beginner", "awaiting_confirmation"),
+            ("Yes, save it", "saved"),
+        ):
+            status, body = await self.request("POST", self.chat_path, {
+                "query": query, "language": "EN", "user_id": 1,
+            })
+            self.assertEqual(status, 200)
+            self.assertEqual(body["response"]["status"], outcome)
+            self.assertEqual(len(fixture.rows()), 1 if outcome == "saved" else 0)
+        self.assertEqual(body["response"]["routine"]["days"][0]["day_type"], "push")
+        self.assertEqual(body["response"]["routine"]["days"][0]["exercises"][0]["name"], "Bench Press")
+        self.assertEqual(fixture.store.turn_count(self.session_id), 3)
+        self.assertEqual(orchestrator.route.call_count, 3)
+        self.assertEqual(len(orchestrator.route.call_args.args[0]["memory"]), 2)
+
+    async def test_routine_requests_require_user_identity(self):
+        orchestrator = Mock(spec=Orchestrator)
+        orchestrator.route.return_value = "routine_maker"
+        app.dependency_overrides[get_pipeline] = lambda: Pipeline(orchestrator)
+        status, body = await self.request("POST", self.chat_path, {
+            "query": "Make a routine", "language": "EN",
+        })
+        self.assertEqual(status, 422)
+        self.assertEqual(body["detail"][0]["loc"], ["body", "user_id"])
+        self.assertIn("require user_id", body["detail"][0]["msg"])
+
+    async def test_real_catalog_workflow_reaches_the_http_response(self):
+        client = Mock(spec=GeminiClient)
+        client.generate.side_effect = [
+            json.dumps({"exercises": ["barbel bench pres", "Face Pull"], "message": ""}),
+            "Press with control. Tell me which step needs more detail.",
+            "Pull with control. Tell me which step needs more detail.",
+        ]
+        orchestrator = Mock(spec=Orchestrator)
+        orchestrator.route.return_value = "exercise_explainer"
+        pipeline = Pipeline(orchestrator, exercise_explainer=ExerciseExplainer(client))
+        app.dependency_overrides[get_pipeline] = lambda: pipeline
+        status, result = await self.request(
+            "POST", self.chat_path,
+            {"query": "Explain barbel bench pres and Face Pull", "language": "EN"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            [exercise["name"] for exercise in result["response"]],
+            ["Barbell Bench Press", "Face Pull"],
+        )
+        self.assertEqual(client.generate.call_count, 3)
+        self.assertEqual(len(result["response"][0]["media_urls"]), 2)
+
+    async def test_catalog_images_are_served_without_exposing_other_database_files(self):
+        status, body = await self.request("GET", "/database/images/anatomy/anatomy_chest.svg")
+        self.assertEqual(status, 200)
+        self.assertIn("<svg", body)
+        for path in ("/database/gym_app.db", "/database/images/../gym_app.db"):
+            status, _ = await self.request("GET", path)
+            self.assertEqual(status, 404)
 
     async def test_returns_no_match_message(self):
         self.pipeline.handle_with_subsystem.return_value = PipelineResult(
@@ -146,6 +256,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                             "parameters": parameters.model_dump(),
                             "message": "What is your level?",
                             "routine": None,
+                            "routine_id": None,
                         }
                     else:
                         system.handle.return_value = "Exercise explanation"
@@ -163,7 +274,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                     app.dependency_overrides[get_pipeline] = lambda: pipeline
                     status, result = await self.request(
                         "POST", self.chat_path,
-                        {"query": "My gym question", "language": language},
+                        {"query": "My gym question", "language": language, "user_id": 1},
                     )
                     self.assertEqual(status, 200)
                     self.assertEqual(result, {"subsystem": target, "response": expected})
@@ -189,6 +300,9 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
             {"query": "Explain squats", "language": "EN", "history": "Workout"},
             {"query": "Explain squats", "language": "EN", "id": "session-morning-workout"},
             {"query": "Explain squats", "language": "EN", "subsystem": "routine_maker"},
+            {"query": "Make a routine", "language": "EN", "user_id": True},
+            {"query": "Make a routine", "language": "EN", "user_id": 0},
+            {"query": "Make a routine", "language": "EN", "user_id": "1"},
         ]
         for payload in payloads:
             with self.subTest(payload=payload):

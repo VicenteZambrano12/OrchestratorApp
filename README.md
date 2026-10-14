@@ -65,8 +65,10 @@ Pydantic validation still checks the content and rejects invalid decisions.
 ## Chat endpoint
 
 `POST /{id}/chat` requires a caller-supplied session ID as a single URL path
-segment and accepts exactly two required JSON fields: `query`, a non-empty
-string, and `language`, either `ES` or `EN`. Request and response models are
+segment and accepts two required JSON fields: `query`, a non-empty
+string, and `language`, either `ES` or `EN`. `user_id` is additionally required
+for Routine Maker and must identify an existing SQLite user. It is not
+authentication. Request and response models are
 defined in separate `ChatRequest.py` and `ChatResponse.py` files in
 `backend/src/api/DataClasses/pipeline/`; the endpoint is defined
 separately in `backend/src/api/Endpoint/chat.py` and imported by the app.
@@ -85,7 +87,11 @@ The required `subsystem` field is the orchestrator's selected ID:
 `routine_maker`, `exercise_explainer`, `past_routines_analyzer`, or `no_system`
 for localized no-match messages. Routing executes once per request.
 Routine Maker results remain structured under `response`, with
-`status`, `parameters`, `message`, and `routine` fields. Invalid request bodies
+`status`, `parameters`, `message`, structured `routine`, and `routine_id` fields.
+Drafts are cached per session/user and require an explicit later confirmation
+before a new inactive routine version is saved. Exercise explanations
+return an exercise list under `response`, or a text clarification request.
+Invalid request bodies
 return HTTP 422. Configuration, provider, and processing failures propagate
 through FastAPI's HTTP 500 handling rather than returning a successful answer.
 HTTP 422 responses use a JSON `detail` array; unhandled HTTP 500 responses use
@@ -93,9 +99,10 @@ plain text (`Internal Server Error`) in non-debug deployments. The API does not
 introduce a custom error envelope or application-level 400/401/403/404 responses.
 Default pipeline execution requires Gemini configuration and incurs API usage.
 The session ID is opaque: it is not an authentication credential, is not checked
-against a session store, and does not load or persist conversation state. The
-endpoint has no conversation state or history input; those remain available
-through the Python pipeline interface. The former `POST /chat` URL now returns
+against a session store. The endpoint uses the latest two stored turns for
+follow-ups and stores successful responses in process-local session memory,
+which is lost on restart. It has no explicit history or routine-state input;
+those remain available through the Python pipeline interface. The former `POST /chat` URL now returns
 HTTP 404; clients must include the session ID in the path.
 
 Run endpoint and OpenAPI documentation tests without live API calls:
@@ -247,9 +254,11 @@ ID, including `no_system`) and `response` (the original text or
 `RoutineMakerResult`). The endpoint uses this metadata-returning method.
 `handle()` delegates to the same execution path and returns only `response`,
 preserving its existing interface without routing twice.
-Pass `parameters` and `routine` as keyword arguments to continue routine
-conversations, or `history` to supply workout records to the analyzer. The
-pipeline does not store conversation state or fetch history.
+Pass `session_id` and `user_id` for routine conversations. Routine Maker retains
+collected parameters and draft JSON in the shared session cache, independently
+of the last two conversational turns. `parameters` and a structured `RoutinePlan`
+can optionally seed the Python interface. Pass `history` to supply workout
+records to the analyzer; the pipeline does not fetch analyzer history.
 
 The constructor accepts an existing `orchestrator` and optional
 `routine_maker`, `exercise_explainer`, and `past_routines_analyzer` instances.
@@ -287,48 +296,67 @@ status 1.
 
 ## Exercise Explainer
 
-`backend/src/systems/exercise_explainer/ExerciseExplainer.py` provides a simple
-two-call Gemini workflow with prompts in
+`backend/src/systems/exercise_explainer/ExerciseExplainer.py` provides a
+database-grounded Gemini workflow with prompts in
 `backend/src/config/prompts/exercise_explainer/exercise_explainer.yaml`.
-The first call extracts an explicitly named exercise or list of exercises.
-If none are named, it returns a request for names without a second call.
-Otherwise, the second call explains each exercise's muscles, setup, execution,
-breathing, common mistakes, and safety tips.
+The first call extracts exercise names, including from memory for follow-ups,
+translating Spanish names into English for catalog lookup. Each name is
+fuzzy-matched against `dim_exercises` in `database/gym_app.db` using normalized
+names, sequence similarity, token order, and subset matching. Exact normalized
+matches take precedence; fuzzy matches require a score of at least 0.78 and
+a lead of at least 0.08 over the next candidate.
 
-The class delegates to `backend/src/utils/exercise_explainer/func/`, with one
-utility function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
-The exercise-decision validation model lives in
-`backend/src/utils/exercise_explainer/dataclass/models.py`; the class interface
-and API call behavior are unchanged.
+Missing names return a text request for names. Unknown or ambiguous names
+(including generic names with several equipment variants) return a text
+clarification request identifying unresolved names and plausible candidates.
+If any name is unresolved, no explanations are generated for that request:
+the result never silently omits part of the requested list.
+
+Matched rows are fetched read-only by ID using parameterized SQL. Results preserve
+request order and deduplicate resolved IDs. Each exercise gets exactly one
+separate explanation call using the original query, requested language, memory,
+and its database context. The explainer uses **1 + N calls** for N unique matched
+exercises, excluding the orchestrator's routing call. Clarifications use one call.
 
 ```python
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 
 explainer = ExerciseExplainer()
-explanation = explainer.handle("Explain squats and bench press", language="EN")
+explanations = explainer.handle(
+    "Explain Barbell Back Squat and Barbell Bench Press", language="EN"
+)
+if isinstance(explanations, list):
+    print([exercise.model_dump() for exercise in explanations])
+else:
+    print(explanations)  # Clarification request.
 ```
 
-`handle()` returns plain text and accepts `EN` (default) or `ES`. As with
+`handle()` returns `list[ExerciseExplanation]` on success or text when
+clarification is required, and accepts `EN` (default) or `ES`. Each exercise has:
+
+- `id`, `name`, `description`, `instructions`, `icon_url`, `anatomy_diagram_url`:
+  exact database values, without rewriting, trimming, or translation.
+- `media_urls`: the two paths decoded from the database's JSON `media_url`
+  string, preserving their exact values and order; SQL null remains JSON null.
+- `llm_explanation`: the only generated field, grounded in the retrieved
+  exercise and personalized to the query and previous explanation. The prompt
+  requires an invitation to ask for further clarification.
+
+The HTTP API serializes the models into a JSON list under `response`; the
+pipeline also serializes this list into session memory for later follow-ups.
+The backend serves only `database/images/` at `/database/images/`; stored paths
+remain unchanged in JSON. Clients can resolve those paths against the backend
+base URL. Frontend integration is not included in this backend-only change;
+existing text-only clients must add support for the structured exercise list.
+
+As with
 Routine Maker, configure `GEMINI_API_KEY` and optionally `LLM_MODEL` in `.env`,
 and put `backend/src` on `PYTHONPATH`. The constructor accepts an existing
-`GeminiClient` and a custom `prompt_path`. Invalid input, malformed model output,
-configuration errors, and provider failures propagate to the caller.
-Orchestrator routing does not automatically execute this class.
-
-To run the live functional test from the repository root:
-
-```bash
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain how to perform a squat." --language EN
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain squats and bench press." --language EN
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explica la sentadilla." --language ES
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_exercise_explainer.py "Explain an exercise." --language EN
-```
-
-The positional query is optional and defaults to a squat explanation.
-`--language` defaults to `EN`. The last example tests missing exercise names
-and should print a request for names rather than an explanation.
-The script makes real Gemini requests using `.env`; API usage and quota apply.
-It prints the response on success, or errors to stderr with exit status 1.
+`GeminiClient`, custom `prompt_path`, and keyword-only `database_path` for a
+different catalog. Default database resolution is independent of the working
+directory. Invalid input, malformed provider output or media JSON, database
+failures, and provider errors propagate rather than producing fabricated data.
+Calls using a real client consume API quota.
 
 Run the mocked tests without API calls:
 
@@ -411,85 +439,100 @@ PYTHONPATH=backend/src uv run --project backend --locked python -m unittest disc
 routine workflow. Its four distinct system prompts are in
 `backend/src/config/prompts/routinemaker/routinemaker.yaml`:
 
-1. **Routing:** identify creation, follow-up answers, updates, or unrelated input
-   and extract explicitly provided requirements into validated JSON.
-2. **Parameter collection:** ask only for missing requirements.
-3. **Routine creation:** generate a plain-text routine once all requirements exist.
-4. **Routine update:** revise a supplied routine and summarize the changes.
+1. **Routing first:** classify `create`, `update_saved`, `update_draft`, `save`,
+   or `no_match`, and extract current requirements/edit details. Pydantic validates
+   the first model response against those allowed choices; invalid output gets
+   up to three total attempts with validation feedback.
+2. **Parameter collection:** ask only for missing requirements or edit details.
+3. **Routine creation:** retrieve eligible exercises from SQLite, generate
+   structured JSON, validate it, cache the draft, and ask for confirmation.
+4. **Routine update:** load a user-owned saved routine or the current draft as
+   context, collect the requested edit, and preview it for confirmation again.
 
 The class delegates to `backend/src/utils/routinemaker/func/`, with one utility
 function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
+`repository.py` handles catalog retrieval, ownership, validation and versioned saves.
 Shared parameter, routing, and result models live in
 `backend/src/utils/routinemaker/dataclass/models.py`. Parameter and result models remain importable
 from `systems.routinemaker.RoutineMaker` for compatibility.
 
-These are conditional stages, not four requests on every turn. Routine requests
-make one routing call followed by one collection, creation, or update call;
-unrelated input makes only the routing call. Requirements are `routine_type`
+These are conditional stages, not four requests on every turn. A normal turn
+makes one routing call followed by at most one collection/creation/update call;
+confirmation and unrelated input only need routing. Invalid generated JSON or
+plans get up to three total generation attempts; provider failures propagate
+without retrying them as validation errors. Requirements are `routine_type`
 (`weider` or `ppl`), `days_per_week` (1-7), `hours_per_session` (positive, at most
 24), and `level` (`beginner`, `intermediate`, or `advanced`). The routing prompt
 normalizes English/Spanish terms, accepts PPPL as a PPL typo, and converts
 session minutes to hours. Missing or ambiguous requirements are not guessed.
-Routine output is plain text for now, not a structured exercise schema.
+The result's `routine` is JSON with `name`, `days`, and `recovery`. Each day has
+`day`, `day_type`, `info`, `duration_minutes`, and `exercises`. Each exercise has
+`exercise_id`, its database `name`, `sets`, `reps`, `rest_seconds`, and `notes`.
+Exercise IDs must exist in `dim_exercises` at or below the requested experience
+level; exercise names are copied from SQLite, not trusted from model output.
+Validation enforces the exact training-day count, consecutive day numbers,
+no duplicate exercises within a day, and the per-session time limit.
 
 ```python
 from systems.routinemaker.RoutineMaker import RoutineMaker
 
 maker = RoutineMaker()
-result = maker.handle("Make me a PPL routine", language="EN")
+result = maker.handle(
+    "Make me a PPL routine", session_id="user-1-chat", user_id=1, language="EN"
+)
 print(result.message)  # Questions for the remaining requirements.
 
 result = maker.handle(
     "Three days a week, one hour per session, beginner",
-    parameters=result.parameters,
-    routine=result.routine,
+    session_id="user-1-chat", user_id=1,
     language="EN",
 )
 print(result.routine)
 
 result = maker.handle(
-    "Change it to four days a week",
-    parameters=result.parameters,
-    routine=result.routine,
+    "Yes, save it",
+    session_id="user-1-chat", user_id=1,
     language="EN",
 )
 print(result.message)
 ```
 
-Conversation state belongs to the caller: pass the previous result's
-`parameters` and `routine` on each follow-up, keeping them separate per user.
-Parameter updates merge with known values. Explicitly invalid or ambiguous
-replacement requirements clear the previous value and trigger a question rather
-than silently reusing it. Results expose `status`
-(`needs_parameters`, `created`, `updated`, or `no_match`), validated `parameters`,
-user-facing `message`, and `routine`. Collection and unrelated requests preserve
-the existing routine. Updates require a non-empty existing routine; absent
-routine state raises `ValueError`. `language` accepts `EN` and `ES`.
+Use the same session/user on follow-ups. State is cached in the session hash under
+`routine_state:<user_id>`, separate from numeric conversation-turn fields.
+The existing Redis client uses **fakeredis**: drafts are process-local and lost
+on restart; this is not a durable external Redis deployment.
+Parameter updates merge with known values. Invalid/ambiguous replacements clear
+the previous value and trigger a question rather than silently reusing it.
+Explicitly starting a fresh routine discards the previous draft's requirements.
 
-`RoutineMaker(client=existing_client, prompt_path=custom_yaml)` supports client
-injection and alternate prompts. The default client reads the same Gemini
-configuration as the orchestrator but uses a 4096-token output budget for longer
+For exercise edits, collect `action` (`add`, `remove`, `replace`, `adjust`),
+training `day`, and `exercise_id`; replacement needs `replacement_exercise_id`,
+and adjustment needs `details`. The model receives catalog names/IDs to resolve
+named exercises. Missing details produce `needs_changes`; missing/ambiguous
+saved-routine selection produces `needs_routine`. Parameter-only schedule
+changes are also supported. Exercise edits preserve unaffected exercises and
+their prescriptions. Beginning any edit revokes the previous preview's confirmation.
+
+Statuses are `needs_parameters`, `needs_changes`, `needs_routine`,
+`awaiting_confirmation`, `saved`, and `no_match`. Only `saved` writes a routine.
+Confirmation saves the preview as a **new inactive version** in `dim_routines`;
+the original and active selection are never overwritten. The description stores
+the plan JSON, parameters, source routine ID, and an idempotent draft ID.
+`routine_id` identifies the newly saved version. Retrying a committed draft does
+not create duplicates. Planned sets are not inserted into completed workout logs.
+
+`RoutineMaker(client=existing_client, prompt_path=custom_yaml,
+database_path=custom_database, state_store=shared_store)` supports dependency
+injection. The default client reads the same Gemini
+configuration as the orchestrator but uses an 8192-token output budget for longer
 routine responses; injected clients retain their own settings. Prompt loading is
 independent of the working directory. Invalid requests or model responses,
 configuration errors, and API failures propagate without silent fallbacks.
-No HTTP endpoint or automatic orchestrator dispatch is added.
-
-Run the live Routine Maker smoke test from the repository root, using the same
-Gemini configuration as the orchestrator:
-
-```bash
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "Make me a Weider routine" --language ES
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "One hour per session, beginner" --parameters '{"routine_type":"ppl","days_per_week":3}'
-PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_routine_maker.py "Change to four days a week" --routine-file routine.txt --parameters '{"routine_type":"ppl","days_per_week":3,"hours_per_session":1,"level":"beginner"}'
-```
-
-The default query supplies all four requirements for routine creation. The script
-prints the result status, collected parameters as JSON, and the routine or
-follow-up message. For later turns, copy the printed JSON into `--parameters`;
-for updates, save the routine text in a UTF-8 file and pass `--routine-file`.
-Each invocation handles one turn and makes real API calls; usage and quota apply.
-Errors go to stderr and return exit status 1; HTTP error bodies redact the API key.
+`POST /{id}/chat` supplies the session ID and accepts numeric `user_id`.
+Missing/unknown users and selecting a routine owned by another user return 422.
+The frontend passes the selected profile ID, renders day/exercise JSON, and offers
+a separate database-save confirmation button. Copying an already saved
+recommendation into the browser's demo workout remains a distinct local action.
 
 Run the mocked workflow tests without API calls:
 

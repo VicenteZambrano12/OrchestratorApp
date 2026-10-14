@@ -1,0 +1,112 @@
+import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+from utils.routinemaker.dataclass.models import RoutineParameters, RoutinePlan
+
+
+DEFAULT_DATABASE = Path(__file__).resolve().parents[5] / "database/gym_app.db"
+
+
+class RoutineInputError(ValueError):
+    """A routine request needs valid user-owned input."""
+
+
+class RoutineRepository:
+    def __init__(self, database_path: str | Path | None = None) -> None:
+        self.path = Path(database_path) if database_path is not None else DEFAULT_DATABASE
+
+    def _connect(self, *, write: bool = False) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path.resolve().as_uri() + ("?mode=rw" if write else "?mode=ro"), uri=True)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys = ON")
+        return db
+
+    def validate_user(self, user_id: int | None) -> None:
+        if type(user_id) is not int or user_id < 1:
+            raise RoutineInputError("Routine requests require a positive user_id.")
+        with closing(self._connect()) as db:
+            if db.execute("SELECT id FROM dim_users WHERE id = ?", (user_id,)).fetchone() is None:
+                raise RoutineInputError("user_id does not identify an existing database user.")
+
+    def catalog(self, parameters: RoutineParameters) -> list[dict[str, object]]:
+        levels = ("beginner", "intermediate", "advanced")
+        allowed = levels[:levels.index(parameters.level) + 1] if parameters.level else levels
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT id, name, primary_muscle, pattern, equipment, level, tracking_type "
+                "FROM dim_exercises WHERE level IN (" + ",".join("?" for _ in allowed) + ") ORDER BY id",
+                allowed,
+            ).fetchall()
+        if not rows:
+            raise ValueError("No catalog exercises match the requested level.")
+        return [dict(row) for row in rows]
+
+    def routines(self, user_id: int) -> list[dict[str, object]]:
+        with closing(self._connect()) as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id, name, is_active FROM dim_routines WHERE user_id = ? ORDER BY id DESC",
+                (user_id,),
+            )]
+
+    def load(self, user_id: int, routine_id: int) -> tuple[RoutinePlan, RoutineParameters]:
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT description FROM dim_routines WHERE id = ? AND user_id = ?",
+                (routine_id, user_id),
+            ).fetchone()
+        if row is None:
+            raise RoutineInputError("The selected routine does not belong to this user.")
+        stored = json.loads(row["description"])
+        return RoutinePlan.model_validate(stored["routine"]), RoutineParameters.model_validate(stored["parameters"])
+
+    def validate_plan(self, plan: RoutinePlan, parameters: RoutineParameters) -> None:
+        if len(plan.days) != parameters.days_per_week:
+            raise ValueError("Routine must contain exactly days_per_week training days.")
+        if [day.day for day in plan.days] != list(range(1, len(plan.days) + 1)):
+            raise ValueError("Routine day numbers must be consecutive and unique, starting at 1.")
+        catalog = {row["id"]: row for row in self.catalog(parameters)}
+        allowed = set(catalog)
+        for day in plan.days:
+            if parameters.hours_per_session is None or day.duration_minutes > parameters.hours_per_session * 60:
+                raise ValueError("Routine session duration exceeds the requested time.")
+            ids = [exercise.exercise_id for exercise in day.exercises]
+            if len(ids) != len(set(ids)):
+                raise ValueError("An exercise may occur only once per training day.")
+            if not set(ids).issubset(allowed):
+                raise ValueError("Routine contains unknown exercise IDs or exercises above the requested level.")
+            for exercise in day.exercises:
+                name = catalog[exercise.exercise_id]["name"]
+                if not isinstance(name, str):
+                    raise ValueError("Catalog exercise names must be strings.")
+                exercise.name = name
+
+    def save(
+        self, user_id: int, plan: RoutinePlan, parameters: RoutineParameters,
+        draft_id: str, source_routine_id: int | None,
+    ) -> int:
+        self.validate_user(user_id)
+        self.validate_plan(plan, parameters)
+        if source_routine_id is not None:
+            self.load(user_id, source_routine_id)
+        document = json.dumps({
+            "draft_id": draft_id, "source_routine_id": source_routine_id,
+            "parameters": parameters.model_dump(), "routine": plan.model_dump(),
+        })
+        with closing(self._connect(write=True)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT id FROM dim_routines WHERE user_id = ? "
+                "AND json_extract(CASE WHEN json_valid(description) THEN description ELSE '{}' END, '$.draft_id') = ?",
+                (user_id, draft_id),
+            ).fetchone()
+            if existing is not None:
+                return existing["id"]
+            cursor = db.execute(
+                "INSERT INTO dim_routines (user_id, name, description, is_active) VALUES (?, ?, ?, 0)",
+                (user_id, plan.name, document),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("Database did not return the saved routine ID.")
+            return cursor.lastrowid

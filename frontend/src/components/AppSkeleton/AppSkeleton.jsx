@@ -1,5 +1,8 @@
+import { useTranslation } from 'react-i18next'
+
 export default function AppSkeleton() {
-  return <div className="app-shell skeleton-shell" role="status" aria-busy="true" aria-label="Loading your workspace">
+  const { t } = useTranslation()
+  return <div className="app-shell skeleton-shell" role="status" aria-busy="true" aria-label={t('Loading your workspace')}>
     <aside className="sidebar">
       <div className="skeleton skeleton-line skeleton-w-40" />
       <div className="skeleton skeleton-block" />
@@ -11,6 +14,6 @@ export default function AppSkeleton() {
       <div className="skeleton skeleton-line skeleton-w-60" />
       <div className="skeleton skeleton-card" />
     </div>
-    <span className="sr-only">Loading…</span>
+    <span className="sr-only">{t('Loading…')}</span>
   </div>
 }

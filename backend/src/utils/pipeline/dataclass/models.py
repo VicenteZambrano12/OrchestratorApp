@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from utils.routinemaker.dataclass.models import RoutineMakerResult
+from utils.exercise_explainer.dataclass.models import ExerciseExplanation
 
 
 SubsystemId = Literal[
@@ -14,4 +15,4 @@ class PipelineResult:
     """Selected orchestrator subsystem and its unchanged response payload."""
 
     subsystem: SubsystemId
-    response: str | RoutineMakerResult
+    response: str | RoutineMakerResult | list[ExerciseExplanation]

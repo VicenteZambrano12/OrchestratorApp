@@ -6,7 +6,8 @@ from systems.orch.Orchestrator import Orchestrator
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from systems.routinemaker.RoutineMaker import RoutineMaker
 from utils.pipeline.dataclass.models import PipelineResult
-from utils.routinemaker.dataclass.models import RoutineParameters
+from utils.routinemaker.dataclass.models import RoutineParameters, RoutinePlan
+from utils.routinemaker.func.repository import RoutineInputError
 
 if TYPE_CHECKING:
     from systems.pipeline.Pipeline import Pipeline
@@ -18,9 +19,11 @@ def handle_with_subsystem(
     language: str = "EN",
     *,
     parameters: RoutineParameters | Mapping[str, object] | None = None,
-    routine: str | None = None,
+    routine: RoutinePlan | None = None,
     history: str | None = None,
     memory: list[dict[str, str]] | None = None,
+    session_id: str | None = None,
+    user_id: int | None = None,
 ) -> PipelineResult:
     """Route once and execute a system, caching dependencies on the pipeline."""
     if not isinstance(query, str) or not query.strip():
@@ -41,12 +44,17 @@ def handle_with_subsystem(
             response=pipeline._orchestrator.no_system_message(language),
         )
     if target == "routine_maker":
+        if user_id is None:
+            raise RoutineInputError("Routine requests require user_id.")
+        if session_id is None:
+            raise RoutineInputError("Routine requests require session_id.")
         if pipeline._routine_maker is None:
             pipeline._routine_maker = RoutineMaker()
         return PipelineResult(
             subsystem="routine_maker",
             response=pipeline._routine_maker.handle(
-                query, parameters=parameters, routine=routine, language=language
+                query, parameters=parameters, routine=routine, language=language,
+                session_id=session_id, user_id=user_id,
             ),
         )
     if target == "exercise_explainer":

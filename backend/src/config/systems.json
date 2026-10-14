@@ -7,7 +7,7 @@
 		{
 			"id": "routine_maker",
 			"name": "Routine Maker",
-			"description": "Create and return a workout routine when the user asks for a new gym routine, training plan, or workout schedule. Tailor the routine to the user's goals, experience, available equipment, and training availability, including exercises, sets, repetitions, and rest periods. Use this system for creating a routine, not for explaining how to perform an individual exercise or reviewing past workouts."
+			"description": "Create a new gym routine, modify a saved routine or the current draft, collect missing workout requirements and exercise edits (add, remove, replace, adjust), preview database-backed exercises, and save a new routine version only after user confirmation. Route short follow-ups such as yes/save it, refusals, or answers to routine questions here when recent memory shows an ongoing routine workflow. Use this system for routine creation, editing and confirmation, not standalone exercise technique explanations or historical progress analysis."
 		},
 		{
 			"id": "exercise_explainer",

@@ -1,27 +1,31 @@
 import { useEffect, useState } from 'react'
-import { v4 as uuidv4 } from 'uuid'
+import { activateUser, listUsers } from './users'
 
-export async function setSessionKey(id, signal) {
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
-  const response = await fetch(`${baseUrl}/${encodeURIComponent(id)}/key`, {
-    method: 'POST',
-    signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
-  })
-  if (!response.ok) throw new Error(`Set key returned HTTP ${response.status}`)
-  return response.json()
-}
-
-// Generates a new session id on every mount (page open/refresh) and registers it in the backend.
 export function useSession() {
-  const [sessionId] = useState(() => uuidv4())
+  const [user, setUser] = useState(null)
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
-    setSessionKey(sessionId, controller.signal).catch((error) => {
-      if (!controller.signal.aborted) console.error('Failed to set session key', error)
-    })
+    async function initialize() {
+      try {
+        const users = await listUsers(controller.signal)
+        if (!users.length) throw new Error('No users are available.')
+        const selected = await activateUser(users[0], controller.signal)
+        if (!controller.signal.aborted) setUser(selected)
+      } catch (error) {
+        if (!controller.signal.aborted) setError(error.message)
+      }
+    }
+    initialize()
     return () => controller.abort()
-  }, [sessionId])
+  }, [attempt])
 
-  return sessionId
+  async function switchUser(next, signal) {
+    const selected = await activateUser(next, signal)
+    if (!signal?.aborted) setUser(selected)
+  }
+
+  return { user, error, switchUser, retry: () => { setError(''); setAttempt((n) => n + 1) } }
 }

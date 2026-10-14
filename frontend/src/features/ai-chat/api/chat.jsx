@@ -1,3 +1,6 @@
+import i18n from 'i18next'
+import { isExerciseList } from '../../ExplainerCard/exercise-data/exerciseData'
+
 export const subsystemNames = {
   routine_maker: 'Routine maker',
   exercise_explainer: 'Exercise explainer',
@@ -36,10 +39,7 @@ export const initialRoutine = {
 
 const demoRoutine = '### Your 3-day training week\n\n- **Monday · Push** — Chest, shoulders, and triceps\n- **Wednesday · Pull** — Back and biceps\n- **Friday · Legs** — Quads, hamstrings, and glutes\n\nStart with **3 sets per exercise**, leaving 1–2 reps in reserve. Use a weight you can control, and rest for 60–120 seconds between sets.'
 
-export const initialMessages = [
-  { id: 'welcome-user', role: 'user', content: 'I want to get stronger and build muscle. I can train 3 days a week, about an hour each session. Where should I start?' },
-  { id: 'welcome-coach', role: 'assistant', subsystem: 'routine_maker', demo: true, content: 'Love that. A clear goal and a realistic schedule are a great place to start. 🌱\n\nA **3-day Push / Pull / Legs split** gives each muscle group focused attention, with plenty of room to recover between sessions.\n\n' + demoRoutine + '\n\nI’ve put together a starting plan for you below. We can fine-tune it to your experience, equipment, and what feels good for your body.', routine: demoRoutine },
-]
+export const initialMessages = []
 
 export async function demoReply(query, signal) {
   await new Promise((resolve, reject) => {
@@ -59,7 +59,27 @@ export async function demoReply(query, signal) {
   return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain. 🌱\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
 }
 
-export async function requestChat(query, sessionId, signal) {
+export function formatRoutine(plan, t) {
+  if (!plan || typeof plan.name !== 'string' || typeof plan.recovery !== 'string' ||
+    !Array.isArray(plan.days) || !plan.days.length || !plan.days.every((day) =>
+      Number.isInteger(day.day) && typeof day.day_type === 'string' && typeof day.info === 'string' &&
+      Number.isFinite(day.duration_minutes) && Array.isArray(day.exercises) && day.exercises.length &&
+      day.exercises.every((item) => Number.isInteger(item.exercise_id) && typeof item.name === 'string' &&
+        Number.isInteger(item.sets) && typeof item.reps === 'string' && Number.isInteger(item.rest_seconds) &&
+        typeof item.notes === 'string'))) {
+    throw new Error(t('The chat API returned an invalid response.'))
+  }
+  return [`## ${plan.name}`, ...plan.days.map((day) =>
+    `### ${t('DAY')} ${day.day} - ${day.day_type}\n\n${day.info}\n\n${day.duration_minutes} min\n\n` +
+    day.exercises.map((item) =>
+      `- **${item.name}** (ID ${item.exercise_id}): ${item.sets} x ${item.reps}; ${t('Rest')}: ${item.rest_seconds}s. ${item.notes}`
+    ).join('\n')), plan.recovery].join('\n\n')
+}
+
+export async function requestChat(query, sessionId, signal, language, userId) {
+  if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
+  if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 1)) throw new Error('Routine user ID must be a positive integer.')
+  const t = i18n.getFixedT(language.toLowerCase())
   const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
   const timeoutSignal = AbortSignal.timeout(90000)
   try {
@@ -68,34 +88,50 @@ export async function requestChat(query, sessionId, signal) {
       response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, language: 'EN' }),
+        body: JSON.stringify({ query, language, ...(userId === undefined ? {} : { user_id: userId }) }),
         signal: AbortSignal.any([signal, timeoutSignal]),
       })
     } catch (error) {
       if (error instanceof TypeError) {
-        const unreachable = new Error('The backend could not be reached.', { cause: error })
+        const unreachable = new Error(t('The backend could not be reached.'), { cause: error })
         unreachable.backendDown = true
         throw unreachable
       }
       throw error
     }
     if (!response.ok) {
-      const error = new Error(`The chat API returned HTTP ${response.status}. Check that the backend is running and your request is valid.`)
+      if (response.status === 422 && response.headers.get('content-type')?.includes('application/json')) {
+        const body = await response.json()
+        if (Array.isArray(body.detail) && body.detail.every((item) => typeof item.msg === 'string')) {
+          throw new Error(`${t('The chat API returned HTTP {{status}}. Check that the backend is running and your request is valid.', { status: response.status })} ${body.detail.map((item) => item.msg).join(' ')}`)
+        }
+      }
+      const error = new Error(t('The chat API returned HTTP {{status}}. Check that the backend is running and your request is valid.', { status: response.status }))
       error.backendDown = response.status >= 500
       throw error
     }
     const data = await response.json()
-    if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error('The chat API returned an unknown subsystem.')
+    if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error(t('The chat API returned an unknown subsystem.'))
     if (typeof data.response === 'string') return { subsystem: data.subsystem, content: data.response }
+    if (data.subsystem === 'exercise_explainer') {
+      if (!isExerciseList(data.response)) throw new Error(t('The chat API returned an invalid exercise list.'))
+      return { subsystem: data.subsystem, content: data.response }
+    }
     const result = data.response
     if (!result || typeof result.message !== 'string' ||
-      !['created', 'updated', 'needs_parameters', 'no_match'].includes(result.status) ||
-      (result.routine !== null && typeof result.routine !== 'string')) {
-      throw new Error('The chat API returned an invalid response.')
+      !['awaiting_confirmation', 'saved', 'needs_parameters', 'needs_changes', 'needs_routine', 'no_match'].includes(result.status)) {
+      throw new Error(t('The chat API returned an invalid response.'))
     }
-    return { subsystem: data.subsystem, content: [result.message, result.routine].filter(Boolean).join('\n\n'), routine: ['created', 'updated'].includes(result.status) ? result.routine : null }
+    const routine = result.routine === null ? null : formatRoutine(result.routine, t)
+    return {
+      subsystem: data.subsystem,
+      content: [result.message, routine].filter(Boolean).join('\n\n'),
+      routine: result.status === 'saved' ? routine : null,
+      awaitingConfirmation: result.status === 'awaiting_confirmation',
+      routineId: result.routine_id,
+    }
   } catch (error) {
-    if (timeoutSignal.aborted) throw new Error('The coach took too long to respond. Please try again.', { cause: error })
+    if (timeoutSignal.aborted) throw new Error(t('The coach took too long to respond. Please try again.'), { cause: error })
     throw error
   }
 }

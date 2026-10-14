@@ -127,7 +127,7 @@ class OpenAPITests(unittest.TestCase):
             parameter["schema"]["examples"],
             ["session-20261014-morning-workout"],
         )
-        self.assertIn("No conversation state", operation["description"])
+        self.assertIn("process-local session memory", operation["description"])
 
     def test_chat_response_requires_selected_subsystem(self):
         schema = self.schema["components"]["schemas"]["ChatResponse"]
@@ -157,7 +157,7 @@ class OpenAPITests(unittest.TestCase):
                 adapter.validate_python(schema["example"])
                 self.assertEqual(
                     adapter.dump_python(
-                        adapter.validate_python(schema["example"]), mode="json"
+                        adapter.validate_python(schema["example"]), mode="json", exclude_none=True
                     ),
                     schema["example"],
                 )
@@ -196,7 +196,7 @@ class OpenAPITests(unittest.TestCase):
         self.assertTrue(RoutineMakerResult.__dataclass_params__.frozen)
         self.assertEqual(
             [field.name for field in fields(RoutineMakerResult)],
-            ["status", "parameters", "message", "routine"],
+            ["status", "parameters", "message", "routine", "routine_id"],
         )
         result = RoutineMakerResult(
             "needs_parameters", parameters, "What is your training level?", None

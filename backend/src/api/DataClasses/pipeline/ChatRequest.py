@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatRequest(BaseModel):
-    """A stateless gym-assistance question with an explicit response language."""
+    """A gym-assistance question with response language and optional routine owner."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -30,6 +30,11 @@ class ChatRequest(BaseModel):
         ...,
         description="Response language: ES for Spanish or EN for English (case-sensitive).",
         examples=["EN", "ES"],
+    )
+    user_id: int | None = Field(
+        default=None, gt=0,
+        description="Existing database user ID. Required when routed to Routine Maker; not authentication.",
+        examples=[None, 1],
     )
 
     @field_validator("query")

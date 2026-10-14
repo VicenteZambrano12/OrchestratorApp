@@ -1,10 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from api.DataClasses.SetKeyResponse import SetKeyResponse
 from api.documentation import INTERNAL_SERVER_ERROR_RESPONSE, VALIDATION_ERROR_RESPONSE
-from api.redis_deps import SetKey, get_set_key
+from api.redis_deps import RedisClient, SetKey, get_routine_store, get_set_key
 
 
 router = APIRouter()
@@ -30,13 +30,18 @@ def set_key(
         ),
     ],
     key_setter: Annotated[SetKey, Depends(get_set_key)],
+    store: Annotated[RedisClient, Depends(get_routine_store)],
+    reset: Annotated[bool, Query(description="Clear this session's conversation and routine draft before initialization.")] = False,
 ) -> SetKeyResponse:
     """Create the session hash for `id` in the in-memory (fakeredis) store.
 
     Initializes the hash with a `created_at` timestamp. Idempotent: if the key
     already exists nothing is changed and `created` is `false`.
+    With `reset=true`, deletes only this session before recreating it.
 
     **Side effects:** writes to process-local memory; data is lost on restart.
     **Permissions:** no authentication or authorization is required.
     """
+    if reset:
+        store.delete_session(id)
     return SetKeyResponse(id=id, created=key_setter.set(id))

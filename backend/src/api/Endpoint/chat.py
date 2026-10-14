@@ -1,12 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from api.DataClasses.pipeline.ChatRequest import ChatRequest
 from api.DataClasses.pipeline.ChatResponse import ChatResponse
 from api.documentation import INTERNAL_SERVER_ERROR_RESPONSE, VALIDATION_ERROR_RESPONSE
 from api.redis_deps import get_n_turns, get_set_turn
 from systems.pipeline.Pipeline import Pipeline
+from utils.routinemaker.func.repository import RoutineInputError
 
 
 router = APIRouter()
@@ -33,7 +34,8 @@ def chat(
         Path(
             description=(
                 "Caller-supplied session identifier, represented as an opaque "
-                "single URL path segment. Does not load or persist conversation state."
+                "single URL path segment. Loads recent conversation memory and "
+                "stores successful turns in process-local session storage."
             ),
             examples=["session-20261014-morning-workout"],
         ),
@@ -43,23 +45,34 @@ def chat(
 ) -> ChatResponse:
     """Route a question and execute the selected gym-assistance system.
 
-    **Business rules:** `query` and `language` are both required; additional
-    fields are rejected. Queries cannot be blank. Language must be `ES` or `EN`.
+    **Business rules:** `query` and `language` are both required; only optional
+    `user_id` is also accepted. Other fields are rejected. Queries cannot be blank.
+    Language must be `ES` or `EN`.
     The query is passed through unchanged, including surrounding whitespace.
     The `id` path parameter is required and identifies the caller's session.
     It is not an authentication credential and is not checked against a session
-    store. No conversation state is loaded or persisted for this identifier.
+    store. The latest two stored turns provide conversation context; successful
+    turns are retained in process-local session memory, which is lost on restart.
 
-    Exercise explanations and past-routine analysis return text. Routine Maker
+    Exercise explanations return a list of original database fields plus one
+    generated llm_explanation per exercise. Missing, ambiguous, or unmatched
+    exercise names return a text clarification request. Past-routine analysis
+    returns text. Routine Maker
     returns a structured result and may ask for missing requirements rather than
     produce a routine. Unsupported questions return a localized no-match answer
     with HTTP 200, not an error. Every successful response includes `subsystem`,
     the ID selected by the orchestrator (`no_system` for unsupported questions),
     alongside the existing `response` payload. Routing runs once per request.
 
+    Routine requests require `user_id` identifying an existing database user.
+    Draft JSON and collected parameters are cached per session and user. New
+    routines and edits return `awaiting_confirmation` without database writes.
+    An explicit confirmation on a later turn saves a new inactive version;
+    the original routine and active selection remain unchanged.
+
     **Side effects:** routing and selected systems may call Gemini and consume
-    provider quota. This endpoint does not retain conversation history or accept
-    previous routine state.
+    provider quota. Successful turns are stored for follow-up explanations.
+    This endpoint does not accept explicit history or previous routine state.
 
     **Permissions:** no authentication or authorization is currently required.
     Provider credentials are supplied by the server, not by callers.
@@ -68,7 +81,13 @@ def chat(
     provider, and processing failures propagate as HTTP 500; no successful
     fallback response is generated.
     """
-    result = pipeline.handle_with_subsystem(
-        request.query, request.language, session_id=id
-    )
+    try:
+        result = pipeline.handle_with_subsystem(
+            request.query, request.language, session_id=id,
+            **({"user_id": request.user_id} if request.user_id is not None else {}),
+        )
+    except RoutineInputError as error:
+        raise HTTPException(status_code=422, detail=[{
+            "loc": ["body", "user_id"], "msg": str(error), "type": "value_error",
+        }]) from error
     return ChatResponse(subsystem=result.subsystem, response=result.response)

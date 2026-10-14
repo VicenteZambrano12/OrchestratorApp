@@ -3,7 +3,9 @@
 	"key_pattern": "<session_id>",
 	"redis_type": "hash",
 	"field_pattern": "<turn_id>",
-	"field_notes": "turn_id is an auto-incremental integer starting at 1 (e.g. HLEN + 1).",
+	"field_notes": "turn_id is an auto-incremental integer starting at 1, calculated from numeric fields only. Non-numeric metadata is ignored.",
+	"routine_state_field": "routine_state:<user_id>",
+	"routine_state_notes": "JSON RoutineState: parameters, routine (days with day_type/info and catalog exercise references), source_routine_id, workflow, change, awaiting_confirmation, draft_id and saved_routine_id. Drafts are isolated per session and user and are not database saves. The current fakeredis backend is process-local; state is lost on restart.",
 	"value_type": "JSON string",
 	"turn_schema": {
 		"user_query": "string - message sent by the user",

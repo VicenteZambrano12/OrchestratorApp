@@ -7,12 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:i18n": "node --test src/i18n/i18n.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "i18next": "^25.6.0",
     "lucide-react": "^1.57.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-i18next": "^16.2.0",
     "react-markdown": "^10.1.0",
     "uuid": "^14.0.3"
   },

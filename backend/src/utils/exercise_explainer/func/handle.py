@@ -1,5 +1,6 @@
 from collections.abc import Callable
-from utils.exercise_explainer.dataclass.models import _ExerciseDecision
+from utils.exercise_explainer.dataclass.models import ExerciseExplanation, _ExerciseDecision
+from utils.exercise_explainer.func.catalog import ExerciseCatalog
 
 
 def handle(
@@ -8,7 +9,8 @@ def handle(
     *,
     language: str = "EN",
     memory: list[dict[str, str]] | None = None,
-) -> str:
+    catalog: ExerciseCatalog | None = None,
+) -> str | list[ExerciseExplanation]:
     """Validate a request, collect names, or explain the supplied exercises."""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -26,5 +28,25 @@ def handle(
         return decision.message.strip()
     if decision.message.strip():
         raise ValueError("named exercises requires an empty message")
-    payload["parameters"] = {"exercises": decision.exercises}
-    return generate_response("explanation", payload)
+    exercises, unresolved = (catalog or ExerciseCatalog()).resolve(decision.exercises)
+    if unresolved:
+        prefix = (
+            "Indica el nombre o la variante exacta de estos ejercicios: "
+            if language == "ES"
+            else "Please clarify the exact name or variant of these exercises: "
+        )
+        return prefix + "; ".join(unresolved)
+    results: list[ExerciseExplanation] = []
+    for exercise in exercises:
+        # Validate catalog values before sending context to the provider.
+        validated = ExerciseExplanation(**exercise, llm_explanation="pending")
+        explanation = generate_response("explanation", {**payload, "exercise": exercise})
+        if not isinstance(explanation, str) or not explanation.strip():
+            raise ValueError("Gemini returned an empty or non-text explanation response")
+        results.append(
+            ExerciseExplanation(
+                **validated.model_dump(exclude={"llm_explanation"}),
+                llm_explanation=explanation.strip(),
+            )
+        )
+    return results

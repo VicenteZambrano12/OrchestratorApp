@@ -4,9 +4,11 @@ import MainView from './pages/MainView/MainView'
 import FailingView from './pages/FailingView/FailingView'
 import { checkHealth } from './hooks/health/health'
 import { useSession } from './hooks/session/session'
+import { useTranslation } from 'react-i18next'
 
 function App() {
-  useSession()
+  const { t } = useTranslation()
+  const session = useSession()
   const [status, setStatus] = useState('checking')
   const [attempt, setAttempt] = useState(0)
 
@@ -18,9 +20,13 @@ function App() {
     return () => controller.abort()
   }, [attempt])
 
-  if (status === 'checking') return <AppSkeleton />
   if (status === 'failed') return <FailingView onRetry={() => { setStatus('checking'); setAttempt((n) => n + 1) }} />
-  return <MainView />
+  if (session.error) return <main className="help-modal">
+    <p role="alert">{t('Could not initialize user session: {{message}}', { message: t(session.error) })}</p>
+    <button className="primary-button" onClick={session.retry}>{t('Retry')}</button>
+  </main>
+  if (status === 'checking' || !session.user) return <AppSkeleton />
+  return <MainView key={session.user.id} user={session.user} onSwitchUser={session.switchUser} />
 }
 
 export default App

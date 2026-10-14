@@ -54,6 +54,12 @@ class RedisClient:
         value = self.client.hget(session_id, str(turn_id))
         return json.loads(value) if value is not None else None
 
+    def get_routine_state(self, session_id: str, user_id: int) -> str | None:
+        return self.client.hget(session_id, f"routine_state:{user_id}")
+
+    def set_routine_state(self, session_id: str, user_id: int, state: str) -> None:
+        self.client.hset(session_id, f"routine_state:{user_id}", state)
+
     def get_session(self, session_id: str) -> dict[int, dict]:
         """Return all turns of a session ordered by turn id."""
         return {i: self.get_turn(session_id, i) for i in self._turn_ids(session_id)}

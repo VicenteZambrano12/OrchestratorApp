@@ -7,12 +7,26 @@ description: |
 
   OrchestratorApp routes gym-related questions to an exercise explainer, a workout
   routine maker, or a past-routine analyzer. Answers use the requested English or
-  Spanish language. Text answers and structured routine results share a `response`
+  Spanish language. Text answers, structured routine results, and database-backed
+  exercise lists share a `response`
   envelope. Each successful response also includes the `subsystem` ID selected
   by the orchestrator: `routine_maker`, `exercise_explainer`,
   `past_routines_analyzer`, or `no_system`. Questions outside the supported
   domains receive a localized no-match answer with `subsystem: no_system` and
   HTTP 200. Routing runs once per request.
+  Exercise lists preserve catalog values (id, name, description, instructions,
+  icon_url, anatomy_diagram_url, and two decoded media_urls) and add a localized
+  llm_explanation generated separately for each exercise. Missing or ambiguous
+  exercise names return text asking for clarification. Catalog images are served
+  at `/database/images/`; returned paths are not rewritten.
+  Routine Maker additionally requires an existing numeric `user_id`. It classifies
+  new routines, saved-routine edits, draft edits, and save confirmations before
+  collecting missing requirements. Its `routine` contains a list of training days
+  with day_type, info and catalog-backed exercises. Drafts return
+  `awaiting_confirmation` and are cached per session/user without writing SQLite.
+  Only a later explicit confirmation saves a new inactive routine version and
+  returns `saved` with `routine_id`; existing routines and active selection remain
+  unchanged. Invalid model output is validated with up to three attempts.
 
   ## Authentication and permissions
 
@@ -34,11 +48,12 @@ description: |
 
   ## Operational notes
 
-  Chat requests can call Gemini and consume provider quota. They are stateless:
-  conversation history and previous routine state are not accepted by this HTTP API.
+  Chat requests can call Gemini and consume provider quota. Explicit conversation
+  history and previous routine state are not accepted in request bodies.
   `POST /{id}/chat` requires a caller-supplied session ID in the URL. The ID is
-  an opaque path segment, not an authentication credential; it does not load or
-  persist conversation state. The former `/chat` URL is not available.
+  an opaque path segment, not an authentication credential. The latest two stored
+  turns supply memory for follow-ups. Successful turns are stored in process-local
+  session memory, which is lost on restart. The former `/chat` URL is not available.
   The health endpoint checks application availability only, not provider readiness.
 contact:
   name: OrchestratorApp maintainers
@@ -48,8 +63,8 @@ license_info:
 openapi_tags:
   - name: Chat
     description: >-
-      Stateless gym assistance: route questions and return localized
-      text answers or structured workout routine results.
+      Session-aware gym assistance: route questions and return localized
+      text answers, exercise lists, or structured workout routine results.
   - name: Health
     description: >-
       Application liveness checks without AI provider calls or
