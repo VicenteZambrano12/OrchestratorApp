@@ -138,6 +138,61 @@ Run the routing tests from the repository root:
 PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_orchestrator.py -v
 ```
 
+## Pipeline
+
+`backend/src/systems/pipeline/Pipeline.py` combines routing and system execution.
+It uses the existing `Orchestrator` class (there is no separate `IOrchestator`
+interface in this repository), passes the query unchanged to the selected
+system, and uses the same `ES` or `EN` language for both calls.
+
+```python
+from systems.pipeline.Pipeline import Pipeline
+
+pipeline = Pipeline()
+result = pipeline.handle("Explain how to perform a squat", "EN")
+```
+
+`handle(query, language="EN")` returns the selected system's result unchanged:
+plain text for Exercise Explainer and Past Routines Analyzer, or a
+`RoutineMakerResult` for Routine Maker. A `no_system` selection returns the
+localized no-match message without invoking a gym system.
+Pass `parameters` and `routine` as keyword arguments to continue routine
+conversations, or `history` to supply workout records to the analyzer. The
+pipeline does not store conversation state or fetch history.
+
+The constructor accepts an existing `orchestrator` and optional
+`routine_maker`, `exercise_explainer`, and `past_routines_analyzer` instances.
+Omitted dependencies are created lazily on first use and reused; default
+instances require the same Gemini configuration as the underlying systems.
+Invalid queries/languages, unsupported subsystem IDs, and configuration or
+provider errors propagate to the caller. No HTTP endpoint is added.
+
+Run the pipeline tests from the repository root:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python -m unittest discover -s backend/tests -p test_pipeline.py -v
+```
+
+To run the live pipeline smoke test from the repository root:
+
+```bash
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_pipeline.py "Explain how to perform a squat" --language EN
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_pipeline.py "Explica cómo hacer una sentadilla" --language ES
+PYTHONPATH=backend/src uv run --project backend --locked python scripts_manual_func_tests/test_pipeline.py "Analyze my progress" --language EN --history-file scripts_manual_func_tests/fixtures/past_routines_history.txt
+```
+
+The script requires `GEMINI_API_KEY` and optionally `LLM_MODEL` in `.env`.
+It makes real routing and downstream Gemini calls, so API usage and quota apply.
+It prints the full flow: input query/language, selected system, and every Gemini
+call's model/settings, system prompt, user payload, response, and duration.
+Routing retries appear as separate numbered API calls. The final section shows
+the system's response (or routine status, parameters, and message), after a
+total API call count. API keys are redacted from trace output; queries, history,
+prompts, and responses are visible, so do not share logs containing private data.
+Use `--parameters` with a JSON object and `--routine-file` with an existing
+routine to test subsequent routine turns. Errors go to stderr and return exit
+status 1.
+
 ## Exercise Explainer
 
 `backend/src/systems/exercise_explainer/ExerciseExplainer.py` provides a simple
