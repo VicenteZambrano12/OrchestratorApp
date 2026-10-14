@@ -148,6 +148,11 @@ If none are named, it returns a request for names without a second call.
 Otherwise, the second call explains each exercise's muscles, setup, execution,
 breathing, common mistakes, and safety tips.
 
+The class delegates to `backend/src/utils/exercise_explainer/`, with one
+utility function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
+The request/response validation model lives alongside the workflow in
+`handle.py`; the class interface and API call behavior are unchanged.
+
 ```python
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 
@@ -193,6 +198,11 @@ history supports an answer. Missing or insufficient history returns a request
 for records; unrelated queries return a no-match message. These use one call.
 Otherwise, the second call summarizes or compares the supplied records, with
 instructions to explain missing data rather than invent progress or metrics.
+
+The class delegates to `backend/src/utils/past_routines_analyzer/`, with one
+utility function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
+The request/response validation model lives alongside the workflow in
+`handle.py`; the class interface and API call behavior are unchanged.
 
 ```python
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer

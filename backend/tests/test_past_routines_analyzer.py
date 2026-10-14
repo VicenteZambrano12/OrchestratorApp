@@ -10,6 +10,9 @@ from urllib.error import HTTPError
 
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from utils.general.GeminiApiCall import GeminiClient
+from utils.past_routines_analyzer.generate import generate
+from utils.past_routines_analyzer.handle import handle
+from utils.past_routines_analyzer.load_prompts import load_prompts
 
 
 HISTORY = (
@@ -171,6 +174,54 @@ class PastRoutinesAnalyzerTests(unittest.TestCase):
                     path.write_text(content, encoding="utf-8")
                     with self.assertRaises(ValueError):
                         PastRoutinesAnalyzer(self.client, path)
+
+
+class PastRoutinesAnalyzerUtilityTests(unittest.TestCase):
+    def test_prompt_loading_utility_validates_default_and_custom_prompts(self):
+        self.assertEqual(set(load_prompts()), {"parameters", "analysis"})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prompts.yaml"
+            path.write_text("parameters: Check\nanalysis: Analyze\n", encoding="utf-8")
+            self.assertEqual(
+                load_prompts(path), {"parameters": "Check", "analysis": "Analyze"}
+            )
+            path.write_text("parameters: Check\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_prompts(path)
+
+    def test_generation_utility_serializes_payload_and_validates_text(self):
+        client = Mock(spec=GeminiClient)
+        client.generate.return_value = " Analysis \n"
+        payload = {"query": "Analyze", "history": HISTORY, "language": "EN"}
+        self.assertEqual(
+            generate(client, {"analysis": "Analyze"}, "analysis", payload), "Analysis"
+        )
+        client.generate.assert_called_once_with(
+            json.dumps(payload, ensure_ascii=True), system_prompt="Analyze"
+        )
+        for response in (" ", None):
+            with self.subTest(response=response):
+                client.generate.return_value = response
+                with self.assertRaises(ValueError):
+                    generate(client, {"analysis": "Analyze"}, "analysis", payload)
+
+    def test_handle_utility_runs_conditional_stages(self):
+        generate_response = Mock(side_effect=[decision(), "Analysis"])
+        self.assertEqual(
+            handle(generate_response, "Analyze", history=HISTORY), "Analysis"
+        )
+        self.assertEqual(
+            [call.args[0] for call in generate_response.call_args_list],
+            ["parameters", "analysis"],
+        )
+        self.assertEqual(generate_response.call_args.args[1]["history"], HISTORY)
+        generate_response = Mock(return_value=decision("needs_history", "Provide history."))
+        self.assertEqual(handle(generate_response, "Analyze"), "Provide history.")
+        generate_response.assert_called_once()
+        generate_response.reset_mock()
+        with self.assertRaises(ValueError):
+            handle(generate_response, "")
+        generate_response.assert_not_called()
 
 
 class PastRoutinesAnalyzerSmokeTests(unittest.TestCase):

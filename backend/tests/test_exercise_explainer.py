@@ -9,6 +9,9 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
+from utils.exercise_explainer.generate import generate
+from utils.exercise_explainer.handle import handle
+from utils.exercise_explainer.load_prompts import load_prompts
 from utils.general.GeminiApiCall import GeminiClient
 
 
@@ -216,6 +219,55 @@ class ExerciseExplainerTests(unittest.TestCase):
                     path.write_text(content, encoding="utf-8")
                     with self.assertRaises(ValueError):
                         ExerciseExplainer(self.client, path)
+
+
+class ExerciseExplainerUtilityTests(unittest.TestCase):
+    def test_prompt_loading_utility_validates_default_and_custom_prompts(self):
+        self.assertEqual(set(load_prompts()), {"parameters", "explanation"})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prompts.yaml"
+            path.write_text("parameters: Extract\nexplanation: Explain\n", encoding="utf-8")
+            self.assertEqual(
+                load_prompts(path), {"parameters": "Extract", "explanation": "Explain"}
+            )
+            path.write_text("parameters: Extract\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_prompts(path)
+
+    def test_generation_utility_serializes_payload_and_validates_text(self):
+        client = Mock(spec=GeminiClient)
+        client.generate.return_value = " Explanation \n"
+        payload = {"query": "Explain squat", "language": "EN"}
+        self.assertEqual(
+            generate(client, {"explanation": "Explain"}, "explanation", payload),
+            "Explanation",
+        )
+        client.generate.assert_called_once_with(
+            json.dumps(payload, ensure_ascii=True), system_prompt="Explain"
+        )
+        for response in (" ", None):
+            with self.subTest(response=response):
+                client.generate.return_value = response
+                with self.assertRaises(ValueError):
+                    generate(client, {"explanation": "Explain"}, "explanation", payload)
+
+    def test_handle_utility_runs_conditional_stages(self):
+        generate_response = Mock(side_effect=[decision(["Squat"]), "Explanation"])
+        self.assertEqual(handle(generate_response, "Explain squat"), "Explanation")
+        self.assertEqual(
+            [call.args[0] for call in generate_response.call_args_list],
+            ["parameters", "explanation"],
+        )
+        self.assertEqual(
+            generate_response.call_args.args[1]["parameters"], {"exercises": ["Squat"]}
+        )
+        generate_response = Mock(return_value=decision([], "Which exercise?"))
+        self.assertEqual(handle(generate_response, "Explain an exercise"), "Which exercise?")
+        generate_response.assert_called_once()
+        generate_response.reset_mock()
+        with self.assertRaises(ValueError):
+            handle(generate_response, "")
+        generate_response.assert_not_called()
 
 
 if __name__ == "__main__":
