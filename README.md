@@ -151,10 +151,12 @@ It does not execute the subsystem. API usage and quota apply; errors go to stder
 and return exit status 1. Use `--language ES` for Spanish.
 
 `backend/src/systems/orch/Orchestrator.py` defines the pipeline's routing entry
-point and imports its routing utilities from `backend/src/utils/orch/`,
-with one utility function per file named after that function.
-Prompt loading, provider adaptation, request/selection validation, and no-match
-messages live in those utility modules; the existing class interface is unchanged.
+point and imports its routing utilities from
+`backend/src/utils/orch/func/`, with one utility function per file named after
+that function. The routing-selection validation model lives in
+`backend/src/utils/orch/dataclass/models.py`. Prompt loading, provider
+adaptation, request validation, and no-match messages are implemented there;
+the existing class interface is unchanged.
 Construct `Orchestrator(selector)` with a callable that accepts
 `(query, subsystems, language)` and returns a configured subsystem's `id` or `no_system`. The callable
 is where your AI provider makes its decision using the subsystem descriptions.
@@ -222,6 +224,12 @@ It uses the existing `Orchestrator` class (there is no separate `IOrchestator`
 interface in this repository), passes the query unchanged to the selected
 system, and uses the same `ES` or `EN` language for both calls.
 
+Routing and system execution live in
+`backend/src/utils/pipeline/func/handle_with_subsystem.py`; the `Pipeline` class
+retains the public methods and cached dependencies. The frozen `PipelineResult`
+and shared `SubsystemId` type live in
+`backend/src/utils/pipeline/dataclass/models.py`.
+
 ```python
 from systems.pipeline.Pipeline import Pipeline
 
@@ -287,10 +295,11 @@ If none are named, it returns a request for names without a second call.
 Otherwise, the second call explains each exercise's muscles, setup, execution,
 breathing, common mistakes, and safety tips.
 
-The class delegates to `backend/src/utils/exercise_explainer/`, with one
+The class delegates to `backend/src/utils/exercise_explainer/func/`, with one
 utility function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
-The request/response validation model lives alongside the workflow in
-`handle.py`; the class interface and API call behavior are unchanged.
+The exercise-decision validation model lives in
+`backend/src/utils/exercise_explainer/dataclass/models.py`; the class interface
+and API call behavior are unchanged.
 
 ```python
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
@@ -338,10 +347,11 @@ for records; unrelated queries return a no-match message. These use one call.
 Otherwise, the second call summarizes or compares the supplied records, with
 instructions to explain missing data rather than invent progress or metrics.
 
-The class delegates to `backend/src/utils/past_routines_analyzer/`, with one
+The class delegates to `backend/src/utils/past_routines_analyzer/func/`, with one
 utility function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
-The request/response validation model lives alongside the workflow in
-`handle.py`; the class interface and API call behavior are unchanged.
+The history-decision validation model lives in
+`backend/src/utils/past_routines_analyzer/dataclass/models.py`; the class
+interface and API call behavior are unchanged.
 
 ```python
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
@@ -407,9 +417,10 @@ routine workflow. Its four distinct system prompts are in
 3. **Routine creation:** generate a plain-text routine once all requirements exist.
 4. **Routine update:** revise a supplied routine and summarize the changes.
 
-The class delegates to `backend/src/utils/routinemaker/`, with one utility
+The class delegates to `backend/src/utils/routinemaker/func/`, with one utility
 function per file: `load_prompts.py`, `generate.py`, and `handle.py`.
-Shared parameter and result models live in `models.py` and remain importable
+Shared parameter, routing, and result models live in
+`backend/src/utils/routinemaker/dataclass/models.py`. Parameter and result models remain importable
 from `systems.routinemaker.RoutineMaker` for compatibility.
 
 These are conditional stages, not four requests on every turn. Routine requests

@@ -1,47 +1,51 @@
-# React + Vite
+# Form frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A responsive React + Vite mockup for OrchestratorApp, with two views:
 
-## Source structure
+- **AI Chat:** example conversation, safe Markdown responses, expandable pipeline
+  summaries, suggested prompts, and an optional live API connection.
+- **My Routine:** a three-day demo workout with editable sets, rep targets, weights
+  in kilograms, and exercise completion. Changes and saved coach recommendations
+  persist in this browser's local storage; they are not synchronized to a server.
 
-```text
-src/
-|-- assets/
-|-- components/
-|-- features/
-|   |-- ai-chat/
-|   |   |-- api/
-|   |   |-- components/
-|   |   |-- hooks/
-|   |   `-- stores/
-|   `-- auth/
-|-- hooks/
-|-- i18n/
-|   `-- languages/
-|-- layouts/
-|-- lib/
-|-- pages/
-|-- router/
-|-- store/
-`-- utils/
+## Run
+
+```sh
+npm install
+npm run dev
 ```
 
-Shared code belongs in the top-level folders; feature-specific code belongs
-under `features/`. Empty folders contain `.gitkeep` placeholders so Git preserves
-the structure. The existing application entry files remain directly in `src/`.
+Demo mode is enabled by default and does not call an AI provider. Switch the
+header selector to **Live API** to connect to the backend. The Vite development
+server proxies `/api` to `http://127.0.0.1:8000`. For a deployed frontend, configure
+a same-origin `/api` reverse proxy, or set `VITE_API_BASE_URL` to a backend base
+URL with appropriate CORS support. Do not put provider credentials in Vite variables.
 
-Currently, two official plugins are available:
+Live chat calls `POST /{sessionId}/chat` with `{ query, language: "EN" }`.
+Sessions are local conversation identifiers; the backend is stateless. Include
+relevant routine/history details in each request. Errors are displayed explicitly.
+The initial conversation and editable workout remain labeled demo content even
+when live mode is selected.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Pipeline and subsystem rendering
 
-## React Compiler
+Demo pipeline stages are illustrative. The current API does not stream
+intermediate events, so live mode shows request-in-progress status and the final
+selected subsystem, not inferred reasoning or fabricated intermediate results.
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+All subsystem answers currently use `react-markdown` without raw HTML support.
+The renderer registry in
+[`SubsystemResponse.jsx`](src/features/ai-chat/components/SubsystemResponse.jsx)
+is the extension point for future React templates for the routine maker,
+exercise explainer, and progress analyzer. Do not insert untrusted HTML directly.
 
-Note: This will impact Vite dev & build performances.
-You can also try [the experimental native React Compiler support in plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md#rust-react-compiler) by using `compiler: true` in the plugin options instead of using the Babel plugin.
+Created or updated routine responses can be saved as Markdown recommendations
+in My Routine. They do not silently replace the structured demo exercise log:
+the backend currently returns routine text, not a structured exercise list.
 
-## Expanding the ESLint configuration
+## Checks
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm run lint
+npm run build
+```
