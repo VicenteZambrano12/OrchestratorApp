@@ -7,6 +7,7 @@ def handle(
     query: str,
     *,
     language: str = "EN",
+    memory: list[dict[str, str]] | None = None,
 ) -> str:
     """Validate a request, collect names, or explain the supplied exercises."""
     if not isinstance(query, str) or not query.strip():
@@ -14,6 +15,8 @@ def handle(
     if language not in ("EN", "ES"):
         raise ValueError("language must be EN or ES")
     payload: dict[str, object] = {"query": query, "language": language}
+    if memory:
+        payload["memory"] = memory
     decision = _ExerciseDecision.model_validate_json(
         generate_response("parameters", payload)
     )

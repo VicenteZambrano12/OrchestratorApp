@@ -20,7 +20,7 @@ class Orchestrator:
 
 	def __init__(
 		self,
-		selector: Callable[[str, list[dict[str, Any]], str], str],
+		selector: Callable[..., str],
 		systems_path: str | Path | None = None,
 	) -> None:
 		if not callable(selector):

@@ -63,13 +63,27 @@ export async function requestChat(query, sessionId, signal) {
   const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
   const timeoutSignal = AbortSignal.timeout(90000)
   try {
-    const response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, language: 'EN' }),
-      signal: AbortSignal.any([signal, timeoutSignal]),
-    })
-    if (!response.ok) throw new Error(`The chat API returned HTTP ${response.status}. Check that the backend is running and your request is valid.`)
+    let response
+    try {
+      response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, language: 'EN' }),
+        signal: AbortSignal.any([signal, timeoutSignal]),
+      })
+    } catch (error) {
+      if (error instanceof TypeError) {
+        const unreachable = new Error('The backend could not be reached.', { cause: error })
+        unreachable.backendDown = true
+        throw unreachable
+      }
+      throw error
+    }
+    if (!response.ok) {
+      const error = new Error(`The chat API returned HTTP ${response.status}. Check that the backend is running and your request is valid.`)
+      error.backendDown = response.status >= 500
+      throw error
+    }
     const data = await response.json()
     if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error('The chat API returned an unknown subsystem.')
     if (typeof data.response === 'string') return { subsystem: data.subsystem, content: data.response }

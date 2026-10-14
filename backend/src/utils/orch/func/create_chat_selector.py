@@ -36,10 +36,18 @@ def create_chat_selector(
 	except (KeyError, IndexError, ValueError, AttributeError) as error:
 		raise ValueError("user_prompt must use only the {payload} placeholder") from error
 
-	def select(query: str, subsystems: list[dict[str, Any]], language: str) -> str:
-		payload = json.dumps({
+	def select(
+		query: str,
+		subsystems: list[dict[str, Any]],
+		language: str,
+		memory: list[dict[str, str]] | None = None,
+	) -> str:
+		data: dict[str, Any] = {
 			"query": query, "subsystems": subsystems, "language": language
-		})
+		}
+		if memory:
+			data["memory"] = memory
+		payload = json.dumps(data)
 		return chat_model([
 			{"role": "system", "content": system_prompt},
 			{"role": "user", "content": user_prompt.format(payload=payload)},

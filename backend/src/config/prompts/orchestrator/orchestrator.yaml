@@ -8,6 +8,9 @@ system_prompt: |
   - query: the user's request, as a non-empty string.
   - subsystems: a non-empty list of available subsystem configurations, each
     containing a unique id and a description of its capabilities.
+  - memory: optional list (oldest first) of the most recent previous turns, each
+    with user_query, system_response and subsystem_chosen. Use it only to resolve
+    follow-up or ambiguous queries; the current query is what you route.
   - language: the requested response language, ES for Spanish or EN for English.
 
   Language rules:

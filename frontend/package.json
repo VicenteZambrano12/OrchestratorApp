@@ -13,7 +13,8 @@
     "lucide-react": "^1.57.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

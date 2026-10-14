@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Activity, ArrowRight, ArrowUp, CheckCheck, ChevronDown,
+  Activity, ArrowRight, ArrowUp, CheckCheck,
   ChevronRight, CircleHelp, Dumbbell, Flame,
   MessageSquare, Plus, RotateCcw, Sparkles, X,
 } from 'lucide-react'
@@ -8,9 +8,10 @@ import BrandMark from '../../components/BrandMark/BrandMark'
 import Pipeline from '../../components/Pipeline/Pipeline'
 import RoutinePreview from '../../components/RoutinePreview/RoutinePreview'
 import TrainingPanel from '../../components/TrainingPanel/TrainingPanel'
+import FailingView from '../FailingView/FailingView'
 import RoutineView from '../../components/RoutineView/RoutineView'
 import { SubsystemResponse } from '../../features/ai-chat/components/SubsystemResponse'
-import { demoReply, initialMessages, initialRoutine, requestChat } from '../../features/ai-chat/api/chat'
+import { initialMessages, initialRoutine, requestChat } from '../../features/ai-chat/api/chat'
 import '../../App.css'
 
 const routineStorageKey = 'form-routine-v1'
@@ -51,7 +52,7 @@ function HelpDialog({ onClose }) {
       <button className="icon-button modal-close" aria-label="Close guidance" autoFocus onClick={onClose}><X size={20} /></button>
       <BrandMark /><h2 id="help-title">Meet your new training partner.</h2>
       <p>Use AI Chat for workout ideas, exercise explanations, and progress reviews. Expand the pipeline to see which specialist handled a request.</p>
-      <p>Demo mode uses illustrative answers. Live API sends English requests to the backend. The endpoint is stateless: include any relevant history or routine in your message.</p>
+      <p>Requests are sent in English to the backend. The endpoint is stateless: include any relevant history or routine in your message.</p>
       <p>My Routine is an editable demo workout. Your sets, weights, completion, and saved coach recommendation stay on this device. Specialist responses currently use Markdown; custom subsystem templates can be added later.</p>
       <button className="primary-button" onClick={onClose}>Got it <ArrowRight size={16} /></button>
     </section>
@@ -64,7 +65,7 @@ function MainView() {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
-  const [demo, setDemo] = useState(true)
+  const [backendDown, setBackendDown] = useState(false)
   const [routine, setRoutine] = useState(restored.routine)
   const [error, setError] = useState(restored.error)
   const [saved, setSaved] = useState(false)
@@ -114,10 +115,11 @@ function MainView() {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const result = demo ? await demoReply(query, controller.signal) : await requestChat(query, sessionId, controller.signal)
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', ...result, demo }])
+      const result = await requestChat(query, sessionId, controller.signal)
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', ...result, demo: false }])
     } catch (requestError) {
-      if (requestError.name !== 'AbortError') setError(`${requestError.message} Your message was not answered. You can retry it below.`)
+      if (requestError.backendDown) setBackendDown(true)
+      else if (requestError.name !== 'AbortError') setError(`${requestError.message} Your message was not answered. You can retry it below.`)
       setInput(query)
     } finally {
       setPending(false)
@@ -132,6 +134,8 @@ function MainView() {
     setError('')
   }
 
+  if (backendDown) return <FailingView onRetry={() => setBackendDown(false)} />
+
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#chat" onClick={() => setTab('chat')}><BrandMark /><span>form<span className="brand-period">.</span></span></a>
@@ -142,7 +146,7 @@ function MainView() {
       <div className="sidebar-bottom"><button className="help-button" onClick={() => setHelp(true)}><CircleHelp size={18} />A little guidance<ArrowRight size={15} /></button><div className="profile"><span className="avatar">JD</span><div><strong>Jamie Davis</strong><span>Your fitness journey</span></div><span className="profile-status" /></div></div>
     </aside>
     <div className="main-shell">
-      <header className="topbar"><div className="breadcrumbs">Your workspace<ChevronRight size={14} /><strong>{tab === 'chat' ? 'AI Chat' : 'My Routine'}</strong></div><div className="topbar-right"><span className="private-label"><span className="status-dot" />Your space to grow</span><label className="mode-switch"><select aria-label="Chat connection mode" value={demo ? 'demo' : 'live'} disabled={pending} onChange={(event) => { setDemo(event.target.value === 'demo'); setError('') }}><option value="demo">Demo mode</option><option value="live">Live API</option></select><ChevronDown size={12} /></label><span className="header-avatar">JD</span></div></header>
+      <header className="topbar"><div className="breadcrumbs">Your workspace<ChevronRight size={14} /><strong>{tab === 'chat' ? 'AI Chat' : 'My Routine'}</strong></div><div className="topbar-right"><span className="private-label"><span className="status-dot" />Your space to grow</span><span className="header-avatar">JD</span></div></header>
       {tab === 'chat' ? <div className="chat-layout">
         <main className="chat-main">
           <div className="chat-intro"><div className="intro-kicker"><Sparkles size={15} /> A LITTLE GUIDANCE. A LOT OF POTENTIAL.</div><h1>Your goals. A smarter plan<span>.</span></h1><p>Meet your AI coach. Built to understand you, designed to move you forward.</p></div>
@@ -157,7 +161,7 @@ function MainView() {
                 {message.routine && <><RoutinePreview demo={message.demo} onOpen={() => saveRecommendation(message.routine)} /><div className="message-actions"><button onClick={() => saveRecommendation(message.routine)}><Plus size={14} />Save recommendation to My Routine</button><span><CheckCheck size={14} />Ready for your review</span></div></>}
               </div>
             </article>)}
-            {pending && <article className="message assistant"><div className="message-avatar"><BrandMark small /></div><div className="message-body"><div className="message-heading"><strong>Form coach</strong><span>Working on it…</span></div><Pipeline pending demo={demo} /></div></article>}
+            {pending && <article className="message assistant"><div className="message-avatar"><BrandMark small /></div><div className="message-body"><div className="message-heading"><strong>Form coach</strong><span>Working on it…</span></div><Pipeline pending demo={false} /></div></article>}
             <div ref={bottomRef} />
           </div>
           {error && <div className="error-message" role="alert">{error}</div>}

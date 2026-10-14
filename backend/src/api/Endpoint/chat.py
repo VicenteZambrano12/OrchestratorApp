@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Path, status
 from api.DataClasses.pipeline.ChatRequest import ChatRequest
 from api.DataClasses.pipeline.ChatResponse import ChatResponse
 from api.documentation import INTERNAL_SERVER_ERROR_RESPONSE, VALIDATION_ERROR_RESPONSE
+from api.redis_deps import get_n_turns, get_set_turn
 from systems.pipeline.Pipeline import Pipeline
 
 
@@ -12,7 +13,7 @@ router = APIRouter()
 
 
 def get_pipeline() -> Pipeline:
-    return Pipeline()
+    return Pipeline(turn_setter=get_set_turn(), turn_getter=get_n_turns())
 
 
 @router.post(
@@ -67,5 +68,7 @@ def chat(
     provider, and processing failures propagate as HTTP 500; no successful
     fallback response is generated.
     """
-    result = pipeline.handle_with_subsystem(request.query, request.language)
+    result = pipeline.handle_with_subsystem(
+        request.query, request.language, session_id=id
+    )
     return ChatResponse(subsystem=result.subsystem, response=result.response)

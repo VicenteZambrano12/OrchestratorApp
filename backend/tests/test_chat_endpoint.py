@@ -12,6 +12,7 @@ from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParam
 
 class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
     chat_path = "/session-20261014-morning-workout/chat"
+    session_id = "session-20261014-morning-workout"
 
     def setUp(self):
         self.pipeline = Mock(spec=Pipeline)
@@ -86,7 +87,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                     "subsystem": "exercise_explainer", "response": "Exercise explanation"
                 })
                 self.pipeline.handle_with_subsystem.assert_called_once_with(
-                    " Explain squats ", language
+                    " Explain squats ", language, session_id=self.session_id
                 )
                 self.pipeline.handle.assert_not_called()
 
@@ -225,7 +226,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                     "subsystem": "exercise_explainer", "response": "Exercise explanation"
                 })
                 self.pipeline.handle_with_subsystem.assert_called_once_with(
-                    "Explain squats", "EN"
+                    "Explain squats", "EN", session_id=session_id
                 )
 
     async def test_health_endpoint_remains_available(self):
@@ -257,7 +258,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         documented = app.openapi()["paths"]["/{id}/chat"]["post"]["responses"]["500"]
         self.assertEqual(result, documented["content"]["text/plain"]["example"])
         self.pipeline.handle_with_subsystem.assert_called_once_with(
-            "Explain a barbell squat.", "EN"
+            "Explain a barbell squat.", "EN", session_id=self.session_id
         )
 
     async def test_documentation_routes_are_available(self):

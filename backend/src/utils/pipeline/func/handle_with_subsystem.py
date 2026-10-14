@@ -20,6 +20,7 @@ def handle_with_subsystem(
     parameters: RoutineParameters | Mapping[str, object] | None = None,
     routine: str | None = None,
     history: str | None = None,
+    memory: list[dict[str, str]] | None = None,
 ) -> PipelineResult:
     """Route once and execute a system, caching dependencies on the pipeline."""
     if not isinstance(query, str) or not query.strip():
@@ -29,7 +30,10 @@ def handle_with_subsystem(
 
     if pipeline._orchestrator is None:
         pipeline._orchestrator = Orchestrator.from_gemini()
-    target = pipeline._orchestrator.route({"query": query}, language=language)
+    payload: dict[str, object] = {"query": query}
+    if memory:
+        payload["memory"] = memory
+    target = pipeline._orchestrator.route(payload, language=language)
 
     if target == "no_system":
         return PipelineResult(
@@ -50,7 +54,9 @@ def handle_with_subsystem(
             pipeline._exercise_explainer = ExerciseExplainer()
         return PipelineResult(
             subsystem="exercise_explainer",
-            response=pipeline._exercise_explainer.handle(query, language=language),
+            response=pipeline._exercise_explainer.handle(
+                query, language=language, **({"memory": memory} if memory else {})
+            ),
         )
     if target == "past_routines_analyzer":
         if pipeline._past_routines_analyzer is None:

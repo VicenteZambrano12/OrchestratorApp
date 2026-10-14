@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from utils.orch.dataclass.models import _RoutingSelection
+from utils.orch.dataclass.models import MemoryTurn, _RoutingSelection
 
 
 def route(
@@ -27,6 +27,11 @@ def route(
 		language = payload.get("language", "EN")
 	if not isinstance(language, str) or language not in ("ES", "EN"):
 		raise ValueError("language must be ES (Spanish) or EN (English)")
+
+	memory = [
+		MemoryTurn.model_validate(turn).model_dump()
+		for turn in payload.get("memory") or []
+	]
 
 	if "subsystems" in payload:
 		subsystems = payload["subsystems"]
@@ -57,9 +62,8 @@ def route(
 	allowed_ids = set(targets) | {"no_system"}
 	last_error: ValidationError | None = None
 	for _ in range(3):
-		selected_id = selector(
-			query, [dict(target) for target in targets.values()], language
-		)
+		arguments = (query, [dict(target) for target in targets.values()], language)
+		selected_id = selector(*arguments, memory) if memory else selector(*arguments)
 		try:
 			selection = _RoutingSelection.model_validate(
 				{"selected_id": selected_id}, context={"allowed_ids": allowed_ids}

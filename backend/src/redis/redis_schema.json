@@ -1,0 +1,22 @@
+{
+	"description": "Template schema for conversation state stored in Redis. One Redis hash per session; each field is a turn id (auto-incremental) whose value is a JSON-encoded string of the turn.",
+	"key_pattern": "<session_id>",
+	"redis_type": "hash",
+	"field_pattern": "<turn_id>",
+	"field_notes": "turn_id is an auto-incremental integer starting at 1 (e.g. HLEN + 1).",
+	"value_type": "JSON string",
+	"turn_schema": {
+		"user_query": "string - message sent by the user",
+		"system_response": "string - response returned by the system",
+		"subsystem_chosen": "string - id of the subsystem selected by the orchestrator (see config/systems.json)"
+	},
+	"example": {
+		"key": "session_8f3a2c1e",
+		"type": "hash",
+		"fields": {
+			"1": "{\"user_query\": \"Create a 3-day push/pull/legs routine for me\", \"system_response\": \"Here is your 3-day PPL routine: ...\", \"subsystem_chosen\": \"routine_maker\"}",
+			"2": "{\"user_query\": \"How do I perform a barbell bench press?\", \"system_response\": \"1. Lie on the bench with your feet flat...\", \"subsystem_chosen\": \"exercise_explainer\"}",
+			"3": "{\"user_query\": \"How has my chest volume changed over the last month?\", \"system_response\": \"Your weekly chest volume increased by 12%...\", \"subsystem_chosen\": \"past_routines_analyzer\"}"
+		}
+	}
+}

@@ -24,10 +24,18 @@ class ExerciseExplainer:
     def _generate(self, stage: str, payload: dict[str, object]) -> str:
         return generate(self._client, self._prompts, stage, payload)
 
-    def handle(self, query: str, *, language: str = "EN") -> str:
+    def handle(
+        self,
+        query: str,
+        *,
+        language: str = "EN",
+        memory: list[dict[str, str]] | None = None,
+    ) -> str:
         """Explain one exercise or a list; ask for names if none were supplied.
 
         Named exercises use exactly two API calls. Missing names use only the
-        first call. Invalid input/output and provider errors propagate.
+        first call. `memory` holds the latest previous turns (oldest first) so
+        follow-ups such as "explain again" can refer to earlier exercises.
+        Invalid input/output and provider errors propagate.
         """
-        return handle(self._generate, query, language=language)
+        return handle(self._generate, query, language=language, memory=memory)
