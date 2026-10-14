@@ -6,6 +6,7 @@ from systems.orch.Orchestrator import Orchestrator
 from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
 from systems.pipeline.Pipeline import Pipeline
 from systems.routinemaker.RoutineMaker import RoutineMaker
+from utils.pipeline.models import PipelineResult
 from utils.routinemaker.models import RoutineMakerResult, RoutineParameters
 
 
@@ -21,6 +22,65 @@ class PipelineTests(unittest.TestCase):
             "past_routines_analyzer": self.past_routines_analyzer,
         }
         self.pipeline = Pipeline(self.orchestrator, **self.systems)
+
+    def test_returns_selected_subsystem_and_unchanged_response_after_routing_once(self):
+        for target, system in self.systems.items():
+            for language in ("ES", "EN"):
+                with self.subTest(target=target, language=language):
+                    self.orchestrator.reset_mock()
+                    for dependency in self.systems.values():
+                        dependency.reset_mock()
+                    self.orchestrator.route.return_value = target
+                    result = self.pipeline.handle_with_subsystem(
+                        "  My workout question  ", language
+                    )
+                    self.assertIsInstance(result, PipelineResult)
+                    self.assertEqual(result.subsystem, target)
+                    self.assertIs(result.response, system.handle.return_value)
+                    self.orchestrator.route.assert_called_once_with(
+                        {"query": "  My workout question  "}, language=language
+                    )
+                    self.assertEqual(system.handle.call_count, 1)
+                    for other_target, dependency in self.systems.items():
+                        if other_target != target:
+                            dependency.handle.assert_not_called()
+
+    def test_metadata_no_match_does_not_invoke_any_system(self):
+        self.orchestrator.route.return_value = "no_system"
+        for language in ("ES", "EN"):
+            with self.subTest(language=language):
+                self.orchestrator.reset_mock()
+                self.orchestrator.no_system_message.return_value = (
+                    Orchestrator.no_system_message(language)
+                )
+                result = self.pipeline.handle_with_subsystem(
+                    "What is the capital of Japan?", language
+                )
+                self.assertEqual(result.subsystem, "no_system")
+                self.assertEqual(result.response, Orchestrator.no_system_message(language))
+                self.assertEqual(self.orchestrator.route.call_count, 1)
+                self.orchestrator.no_system_message.assert_called_once_with(language)
+                for system in self.systems.values():
+                    system.handle.assert_not_called()
+
+    def test_metadata_preserves_structured_result_and_routine_state(self):
+        self.orchestrator.route.return_value = "routine_maker"
+        parameters = RoutineParameters(days_per_week=3)
+        response = RoutineMakerResult(
+            status="needs_parameters",
+            parameters=parameters,
+            message="What is your training level?",
+            routine=None,
+        )
+        self.routine_maker.handle.return_value = response
+        result = self.pipeline.handle_with_subsystem(
+            "Three days", "EN", parameters=parameters, routine="Previous routine"
+        )
+        self.assertEqual(result.subsystem, "routine_maker")
+        self.assertIs(result.response, response)
+        self.routine_maker.handle.assert_called_once_with(
+            "Three days", parameters=parameters, routine="Previous routine", language="EN"
+        )
 
     def test_routes_and_invokes_only_selected_system_in_requested_language(self):
         query = "  My workout question  "

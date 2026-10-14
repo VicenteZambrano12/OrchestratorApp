@@ -1,0 +1,56 @@
+title: OrchestratorApp
+summary: AI-powered gym assistance and workout orchestration.
+version: "0.1.0"
+description: |
+
+  ## Overview
+
+  OrchestratorApp routes gym-related questions to an exercise explainer, a workout
+  routine maker, or a past-routine analyzer. Answers use the requested English or
+  Spanish language. Text answers and structured routine results share a `response`
+  envelope. Each successful response also includes the `subsystem` ID selected
+  by the orchestrator: `routine_maker`, `exercise_explainer`,
+  `past_routines_analyzer`, or `no_system`. Questions outside the supported
+  domains receive a localized no-match answer with `subsystem: no_system` and
+  HTTP 200. Routing runs once per request.
+
+  ## Authentication and permissions
+
+  These endpoints currently require **no authentication** or authorization headers.
+  The backend, not the caller, supplies Gemini credentials through server
+  configuration. Never include provider credentials in a request body.
+
+  ## Error formats
+
+  - **422 Unprocessable Entity**: invalid chat requests return JSON with a `detail`
+    array. Each entry describes the error using `loc`, `msg`, and `type`, and may
+    include `input` and `ctx`.
+  - **500 Internal Server Error**: unhandled configuration, provider, or processing
+    failures return plain text (`Internal Server Error`) in non-debug mode, not a
+    JSON error envelope. Debug deployments may expose tracebacks.
+
+  No application-level 400, 401, 403, or 404 responses are defined for these
+  operations. Unknown URLs use FastAPI's default 404 JSON response.
+
+  ## Operational notes
+
+  Chat requests can call Gemini and consume provider quota. They are stateless:
+  conversation history and previous routine state are not accepted by this HTTP API.
+  `POST /{id}/chat` requires a caller-supplied session ID in the URL. The ID is
+  an opaque path segment, not an authentication credential; it does not load or
+  persist conversation state. The former `/chat` URL is not available.
+  The health endpoint checks application availability only, not provider readiness.
+contact:
+  name: OrchestratorApp maintainers
+  url: https://github.com/VicenteZambrano12/OrchestratorApp/issues
+license_info:
+  name: Not specified; no license granted
+openapi_tags:
+  - name: Chat
+    description: >-
+      Stateless gym assistance: route questions and return localized
+      text answers or structured workout routine results.
+  - name: Health
+    description: >-
+      Application liveness checks without AI provider calls or
+      external dependency checks.

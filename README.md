@@ -23,9 +23,86 @@ activation is not required. To add a dependency, run
 `uv add --project backend <package>`, and commit both the manifest and lockfile.
 
 The FastAPI application is defined in `backend/src/app.py` and imports the health
-router from `backend/src/api/Endpoint/health.py`. Its initial endpoint is `GET /health`,
+and chat routers from `backend/src/api/Endpoint/`. `GET /health`
 which returns HTTP 200 with `{"status": "ok"}`. Interactive API documentation is
-available at `http://127.0.0.1:8000/docs`.
+available in Swagger UI at `http://127.0.0.1:8000/docs` and ReDoc at
+`http://127.0.0.1:8000/redoc`; the OpenAPI schema is served at
+`http://127.0.0.1:8000/openapi.json`. The schema groups endpoints into Chat and
+Health and includes field descriptions, full payload examples, and actual error
+formats. API version metadata is `0.1.0`; no project license is currently declared.
+App metadata (title, summary, version, Markdown description, contact, license, and
+tags) lives in `backend/src/api/documentation.yaml` and is loaded at startup
+relative to its Python loader, independently of the working directory. Invalid
+or missing metadata fails startup explicitly. Restart the backend after editing
+this YAML file.
+Neither endpoint requires authentication. Provider credentials are configured
+on the server and must not be included in client requests. `/health` is a liveness
+check only: it does not validate provider readiness.
+
+## Gemini connectivity diagnostic
+
+To isolate provider failures from routing and chat processing, make one harmless
+Gemini call using the same server configuration:
+
+```bash
+uv run --project backend --locked python backend/src/check_gemini_api.py
+```
+
+The script reads `GEMINI_API_KEY` and `LLM_MODEL` using the existing Gemini client
+and sends only `Reply with exactly: Gemini connectivity OK`. It prints the
+configured model and generated answer, or the HTTP status, provider error body,
+and `Retry-After` header when present. API keys are redacted from error messages.
+It does not retry; successful calls consume provider quota. Exit status is 0 on
+success and 1 for configuration, network, or provider errors. Use
+`--model gemini-2.5-flash-lite` to override the model for this diagnostic only.
+
+The Gemini client defaults to text output for answers and orchestrator IDs.
+Structured decision stages explicitly request `application/json`: Exercise
+Explainer and Past Routines Analyzer parameter decisions, and Routine Maker
+routing decisions. This prevents Markdown code fences around JSON; existing
+Pydantic validation still checks the content and rejects invalid decisions.
+
+## Chat endpoint
+
+`POST /{id}/chat` requires a caller-supplied session ID as a single URL path
+segment and accepts exactly two required JSON fields: `query`, a non-empty
+string, and `language`, either `ES` or `EN`. Request and response models are
+defined in separate `ChatRequest.py` and `ChatResponse.py` files in
+`backend/src/api/DataClasses/pipeline/`; the endpoint is defined
+separately in `backend/src/api/Endpoint/chat.py` and imported by the app.
+
+With the backend running:
+
+```bash
+curl -X POST http://127.0.0.1:8000/session-20261014-morning-workout/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Explain how to perform a squat","language":"EN"}'
+```
+
+The endpoint routes and executes the query with `Pipeline`, returning HTTP 200
+with `{"subsystem": "exercise_explainer", "response": "..."}` for text results.
+The required `subsystem` field is the orchestrator's selected ID:
+`routine_maker`, `exercise_explainer`, `past_routines_analyzer`, or `no_system`
+for localized no-match messages. Routing executes once per request.
+Routine Maker results remain structured under `response`, with
+`status`, `parameters`, `message`, and `routine` fields. Invalid request bodies
+return HTTP 422. Configuration, provider, and processing failures propagate
+through FastAPI's HTTP 500 handling rather than returning a successful answer.
+HTTP 422 responses use a JSON `detail` array; unhandled HTTP 500 responses use
+plain text (`Internal Server Error`) in non-debug deployments. The API does not
+introduce a custom error envelope or application-level 400/401/403/404 responses.
+Default pipeline execution requires Gemini configuration and incurs API usage.
+The session ID is opaque: it is not an authentication credential, is not checked
+against a session store, and does not load or persist conversation state. The
+endpoint has no conversation state or history input; those remain available
+through the Python pipeline interface. The former `POST /chat` URL now returns
+HTTP 404; clients must include the session ID in the path.
+
+Run endpoint and OpenAPI documentation tests without live API calls:
+
+```bash
+PYTHONPATH=backend/src:backend/tests uv run --project backend --locked python -m unittest test_chat_endpoint test_openapi -v
+```
 
 ## Orchestrator routing
 
@@ -156,6 +233,12 @@ result = pipeline.handle("Explain how to perform a squat", "EN")
 plain text for Exercise Explainer and Past Routines Analyzer, or a
 `RoutineMakerResult` for Routine Maker. A `no_system` selection returns the
 localized no-match message without invoking a gym system.
+`handle_with_subsystem(query, language="EN")` accepts the same arguments and
+returns a frozen `PipelineResult` with `subsystem` (the orchestrator's selected
+ID, including `no_system`) and `response` (the original text or
+`RoutineMakerResult`). The endpoint uses this metadata-returning method.
+`handle()` delegates to the same execution path and returns only `response`,
+preserving its existing interface without routing twice.
 Pass `parameters` and `routine` as keyword arguments to continue routine
 conversations, or `history` to supply workout records to the analyzer. The
 pipeline does not store conversation state or fetch history.
@@ -165,7 +248,8 @@ The constructor accepts an existing `orchestrator` and optional
 Omitted dependencies are created lazily on first use and reused; default
 instances require the same Gemini configuration as the underlying systems.
 Invalid queries/languages, unsupported subsystem IDs, and configuration or
-provider errors propagate to the caller. No HTTP endpoint is added.
+provider errors propagate to the caller. The `POST /{id}/chat` endpoint wraps
+this interface as documented above.
 
 Run the pipeline tests from the repository root:
 

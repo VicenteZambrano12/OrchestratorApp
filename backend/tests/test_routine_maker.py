@@ -203,6 +203,7 @@ class RoutineMakerUtilityTests(unittest.TestCase):
         )
         client.generate.assert_called_once_with(
             json.dumps({"query": "Hi"}), system_prompt="Create",
+            response_mime_type="text/plain",
         )
 
     def test_handle_utility_runs_conditional_stages(self):

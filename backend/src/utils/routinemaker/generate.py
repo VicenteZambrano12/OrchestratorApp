@@ -14,6 +14,7 @@ def generate(
     response = client.generate(
         json.dumps(payload, ensure_ascii=True),
         system_prompt=prompts[stage],
+        response_mime_type="application/json" if stage == "routing" else "text/plain",
     )
     if not isinstance(response, str) or not response.strip():
         raise ValueError(f"Gemini returned an empty or non-text {stage} response")

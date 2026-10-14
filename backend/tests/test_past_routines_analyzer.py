@@ -197,7 +197,8 @@ class PastRoutinesAnalyzerUtilityTests(unittest.TestCase):
             generate(client, {"analysis": "Analyze"}, "analysis", payload), "Analysis"
         )
         client.generate.assert_called_once_with(
-            json.dumps(payload, ensure_ascii=True), system_prompt="Analyze"
+            json.dumps(payload, ensure_ascii=True), system_prompt="Analyze",
+            response_mime_type="text/plain",
         )
         for response in (" ", None):
             with self.subTest(response=response):

@@ -1,9 +1,10 @@
-"""Reusable text-only Gemini Developer API client."""
+"""Reusable Gemini Developer API client with text and JSON output modes."""
 
 from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -47,18 +48,26 @@ class GeminiClient:
         if self.max_output_tokens <= 0 or self.timeout <= 0:
             raise ValueError("max_output_tokens and timeout must be positive.")
 
-    def generate(self, prompt: str, *, system_prompt: str | None = None) -> str:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        response_mime_type: Literal["text/plain", "application/json"] = "text/plain",
+    ) -> str:
         """Return generated text; API, network, and response errors propagate."""
         if not prompt.strip():
             raise ValueError("prompt must not be empty.")
         if system_prompt is not None and not system_prompt.strip():
             raise ValueError("system_prompt must not be empty.")
+        if response_mime_type not in ("text/plain", "application/json"):
+            raise ValueError("response_mime_type must be text/plain or application/json.")
 
         payload: dict[str, object] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "maxOutputTokens": self.max_output_tokens,
-                "responseMimeType": "text/plain",
+                "responseMimeType": response_mime_type,
             },
         }
         if system_prompt is not None:
