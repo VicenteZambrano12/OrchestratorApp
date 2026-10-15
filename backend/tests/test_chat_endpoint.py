@@ -25,7 +25,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_pipeline] = lambda: self.pipeline
         self.addCleanup(app.dependency_overrides.pop, get_pipeline)
 
-    async def request(self, method, path, payload=None, expected_error=None):
+    async def request(self, method, path, payload=None, expected_error=None, include_headers=False):
         path, _, query = path.partition("?")
         body = json.dumps(payload).encode("utf-8") if payload is not None else b""
         messages = []
@@ -77,6 +77,8 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
             if b"application/json" in content_type
             else response_body.decode("utf-8")
         )
+        if include_headers:
+            return status, result, dict(headers)
         return status, result
 
     async def test_returns_text_and_passes_both_fields_unchanged(self):

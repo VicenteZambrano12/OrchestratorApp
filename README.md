@@ -62,6 +62,42 @@ Explainer and Past Routines Analyzer parameter decisions, and Routine Maker
 routing decisions. This prevents Markdown code fences around JSON; existing
 Pydantic validation still checks the content and rejects invalid decisions.
 
+## User endpoints
+
+User endpoints each have their own router module in `backend/src/api/Endpoint/`:
+`users.py` handles `GET /users`, `register_user.py` handles `POST /users`, and
+`active_routine.py` handles `GET /users/{user_id}/routine`, and `set_routine.py`
+handles `PUT /users/{user_id}/routine`. Shared user models,
+SQLite persistence, and the user repository dependency live in `backend/src/api/user_deps.py`.
+
+To set a user's current routine, send the complete routine JSON (`name`, `summary`,
+`days`, and `recovery`) directly as the PUT body, using the same format returned
+by GET. The endpoint returns HTTP 200 with the saved routine, normalizing exercise
+names from the catalog. It saves a new version and marks all of that user's
+previous routines inactive in one transaction, without changing other users'
+routines or requiring a chat session. Previous versions remain available.
+Days must be numbered consecutively from 1, exercises must exist in the catalog,
+and each exercise may appear only once per day. Invalid input returns 422 and
+unknown users return 404 without changing the active routine. The stored
+parameters derive the day count and longest session duration from the plan;
+the split and experience level remain unspecified.
+
+The frontend uses this PUT endpoint for both the preview's Save button and
+explicit chat confirmations. It sends `client_saves_routine: true` with chat
+requests so confirmations return `save_requested` rather than saving twice.
+The subsequent PUT includes `session_id`, `draft_id`, and `language` query
+parameters, verifies the full body matches the cached preview, preserves the
+preview's original parameters, and updates chat state and memory. Retrying the
+same draft does not create a duplicate or reactivate an older version. Stale or
+mismatched previews return 422. Chat clients that omit the flag keep the existing
+server-side save behavior.
+
+```bash
+curl -X PUT http://127.0.0.1:8000/users/1/routine \
+  -H "Content-Type: application/json" \
+  --data-binary @routine.json
+```
+
 ## Chat endpoint
 
 `POST /{id}/chat` requires a caller-supplied session ID as a single URL path

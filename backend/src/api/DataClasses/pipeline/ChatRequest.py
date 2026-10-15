@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
             "example": {
                 "query": "Explain how to perform a barbell squat safely.",
                 "language": "EN",
+                "client_saves_routine": False,
             }
         },
     )
@@ -35,6 +36,11 @@ class ChatRequest(BaseModel):
         default=None, gt=0,
         description="Existing database user ID. Required when routed to Routine Maker; not authentication.",
         examples=[None, 1],
+    )
+    client_saves_routine: bool = Field(
+        default=False,
+        description="Return save_requested on confirmation so the client can persist the draft through PUT /users/{user_id}/routine.",
+        examples=[False, True],
     )
 
     @field_validator("query")

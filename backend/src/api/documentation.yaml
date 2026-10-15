@@ -24,9 +24,40 @@ description: |
   collecting missing requirements. Its `routine` contains a list of training days
   with day_type, info and catalog-backed exercises. Drafts return
   `awaiting_confirmation` and are cached per session/user without writing SQLite.
-  Only a later explicit confirmation saves a new inactive routine version and
-  returns `saved` with `routine_id`; existing routines and active selection remain
-  unchanged. Invalid model output is validated with up to three attempts.
+  By default, a later explicit confirmation saves a new active routine version
+  and returns `saved` with `routine_id`; previous versions remain preserved but
+  inactive. Clients can instead opt into the frontend-owned save flow described
+  below. Invalid model output is validated with up to three attempts.
+  `GET /users/{user_id}/routine` returns the active saved routine for an existing
+  user, or `null` when the user has no active routine. An unknown user returns 404.
+  `PUT /users/{user_id}/routine` accepts that same complete routine JSON directly
+  (without a wrapper) and returns the saved routine. It validates catalog exercise
+  IDs and saves a new active version, atomically marking all previous versions for
+  that user inactive. Other users are unaffected. Invalid routines return 422;
+  an unknown user returns 404. No chat session or AI call is required.
+  Both GET and PUT include the saved version's database ID in the `X-Routine-Id`
+  response header when a routine exists, without changing the routine JSON body.
+  Cross-origin deployments must expose this header in their CORS configuration.
+  The frontend supplies `client_saves_routine: true` to chat. Explicit chat
+  confirmations then return `save_requested` without a database write. Both that
+  response and the preview's Save button use PUT with `session_id`, `draft_id`,
+  and `language` query parameters. This verifies the submitted plan against the
+  cached preview, preserves its parameters, updates chat state and memory, and
+  makes retries idempotent. Stale or mismatched drafts return 422. Clients that
+  omit the chat flag retain server-side confirmation saves.
+
+  `POST /users/{user_id}/workouts` records a completed workout, not a routine plan.
+  Its JSON body contains an owned `routine_id` and a non-empty `sets` list.
+  Each set specifies a catalog `exercise_id` and actual reps, duration_seconds,
+  or distance_meters, with optional weight and rpe (1-10). Weight uses the user's
+  configured weight unit. Exercise order follows first appearance and set numbers
+  increment per exercise. All sets are saved atomically in `fact_workout_sets`
+  with one generated `training_id` and the same server-generated UTC `created_at`.
+  HTTP 201 returns training_id, user_id, routine_id, date (YYYY-MM-DD UTC),
+  created_at, and sets_saved. Clients cannot supply a date or user ID in the body.
+  Unknown users return 404; invalid sets, unknown exercises, and routines not
+  owned by the URL user return 422 without saving any sets. Each call creates
+  a new session; active routines and other users' records remain unchanged.
 
   ## Authentication and permissions
 
@@ -43,8 +74,8 @@ description: |
     failures return plain text (`Internal Server Error`) in non-debug mode, not a
     JSON error envelope. Debug deployments may expose tracebacks.
 
-  No application-level 400, 401, 403, or 404 responses are defined for these
-  operations. Unknown URLs use FastAPI's default 404 JSON response.
+  The active-routine endpoint returns 404 when the requested user does not exist.
+  Unknown URLs use FastAPI's default 404 JSON response.
 
   ## Operational notes
 

@@ -16,6 +16,8 @@ let SubsystemResponse
 let exerciseData
 let usersApi
 let routineData
+let workoutEditing
+let sessionTime
 const storage = new Map()
 const html = { lang: 'en' }
 const originals = ['document', 'localStorage'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
@@ -39,6 +41,8 @@ before(async () => {
   exerciseData = await server.ssrLoadModule('/src/features/ExplainerCard/exercise-data/exerciseData.jsx')
   usersApi = await server.ssrLoadModule('/src/hooks/session/users.js')
   routineData = await server.ssrLoadModule('/src/features/RoutineMaker/routine-data/routineData.js')
+  workoutEditing = await server.ssrLoadModule('/src/features/RoutineView/workout-editing/workoutEditing.jsx')
+  sessionTime = await server.ssrLoadModule('/src/features/RoutineView/workout-session/sessionTime.jsx')
 })
 
 after(async () => {
@@ -100,14 +104,75 @@ test('chat, routine and unavailable screens render in both languages without cha
     assert.ok(main.includes(language === 'es' ? 'Enviar mensaje' : 'Send message'))
     assert.ok(main.includes(language === 'es' ? 'Claro' : 'Light'))
     assert.match(main, new RegExp(`lang="${language}"[^>]+aria-pressed="true"`))
-    const routine = renderToStaticMarkup(createElement(RoutineView, { routine: chat.initialRoutine }))
+    const routine = renderToStaticMarkup(createElement(RoutineView, { routine: chat.initialRoutine, workoutSession: { isWorkoutActive: false } }))
     assert.ok(routine.includes(language === 'es' ? 'Press de banca con barra' : 'Barbell bench press'))
     assert.ok(routine.includes(language === 'es' ? 'Editar entrenamiento' : 'Edit workout'))
+    assert.ok(routine.includes(language === 'es' ? 'Iniciar entrenamiento' : 'Start Workout'))
+    assert.ok(routine.includes(language === 'es' ? '0/5 completados' : '0/5 completed'))
+    assert.equal((routine.match(/class="exercise-input"/g) || []).length, 15)
+    assert.equal((routine.match(/role="checkbox"/g) || []).length, 5)
+    assert.ok(!routine.includes('readonly') && !routine.includes('class="routine-summary"'))
+    assert.ok(!routine.includes('class="exercise-grip"') && !routine.includes('class="add-exercise"'))
     const unavailable = renderToStaticMarkup(createElement(FailingView))
     assert.ok(unavailable.includes(language === 'es' ? 'Servidor no disponible' : 'Backend unavailable'))
     assert.ok(!main.includes('{{') && !routine.includes('{{'))
   }
   assert.deepEqual(chat.initialRoutine, before)
+})
+
+test('routine inputs accept rep ranges and fractional weights and reject invalid targets', () => {
+  const { isValidExercise, isValidExerciseField } = workoutEditing
+  const exercise = { sets: 3, reps: '8–12', weight: 0 }
+  assert.equal(isValidExercise(exercise), true)
+  for (const sets of [1, 20, '4']) assert.equal(isValidExercise({ ...exercise, sets }), true)
+  for (const sets of ['', 0, 21, 1.5, 'oops']) assert.equal(isValidExercise({ ...exercise, sets }), false)
+  for (const weight of [0, '0', 12.75, '100.25']) assert.equal(isValidExercise({ ...exercise, weight }), true)
+  for (const weight of ['', ' ', -1, Infinity, 'oops', null, undefined]) assert.equal(isValidExercise({ ...exercise, weight }), false)
+  for (const reps of ['8-12', 'AMRAP', '30s']) assert.equal(isValidExerciseField('reps', reps), true)
+  for (const reps of ['', '   ', undefined]) assert.equal(isValidExerciseField('reps', reps), false)
+})
+
+test('exercise updates and reordering preserve prescriptions, completion, and other days', () => {
+  const { updateDayExercises, moveExercise } = workoutEditing
+  const before = structuredClone(chat.initialRoutine)
+  const source = structuredClone(before)
+  source.days[0].exercises[0].completed = true
+  const next = updateDayExercises(source, 0, (exercises) => moveExercise(exercises, 0, 4))
+  assert.deepEqual(next.days[0].exercises[4], source.days[0].exercises[0])
+  assert.equal(next.days[1], source.days[1])
+  assert.equal(next.days[0].exercises[0], source.days[0].exercises[1])
+  assert.equal(source.days[0].exercises[0].name, before.days[0].exercises[0].name)
+  for (const [from, to] of [[-1, 1], [0, 99], [null, 1], [1, 1]]) {
+    assert.equal(moveExercise(source.days[0].exercises, from, to), source.days[0].exercises)
+  }
+  const empty = updateDayExercises(source, 0, () => [])
+  assert.equal(empty.days[0].exercises.length, 0)
+  const added = updateDayExercises(empty, 0, (exercises) => [...exercises, before.days[0].exercises[0]])
+  assert.deepEqual(added.days[0].exercises, [before.days[0].exercises[0]])
+  assert.deepEqual(chat.initialRoutine, before)
+})
+
+test('rest durations use the exact saved or demo prescription and timer formatting never goes negative', () => {
+  const { restSeconds, formatTime } = sessionTime
+  for (const [rest, seconds] of [['90s', 90], ['60s', 60], ['90 sec', 90], ['2 min', 120], ['1.5 minutes', 90], ['0s', 0]]) {
+    assert.equal(restSeconds(rest), seconds)
+  }
+  for (const rest of ['oops', '-5s', '', '90', null]) assert.throws(() => restSeconds(rest), /Invalid rest duration/)
+  for (const [seconds, time] of [[0, '00:00'], [9, '00:09'], [60, '01:00'], [125, '02:05'], [3600, '60:00'], [-1, '00:00']]) {
+    assert.equal(formatTime(seconds), time)
+  }
+})
+
+test('zero weights invite entry and every day card reports its own completion', async () => {
+  await translations.setLanguage('en')
+  const routine = structuredClone(chat.initialRoutine)
+  routine.days[0].exercises[0].weight = 0
+  routine.days[1].exercises[0].completed = true
+  const rendered = renderToStaticMarkup(createElement(RoutineView, { routine, workoutSession: { isWorkoutActive: false } }))
+  assert.match(rendered, /placeholder="-- kg" value=""/)
+  assert.match(rendered, /1\/5 completed/)
+  assert.equal((rendered.match(/aria-checked="false"/g) || []).length, 5)
+  assert.ok(!rendered.includes('class="session-status"') && !rendered.includes('class="rest-countdown"'))
 })
 
 test('each chat request sends the exact uppercase language and preserves its response', async () => {
@@ -157,13 +222,14 @@ test('routine drafts render structured days but only saved versions provide a re
       assert.deepEqual(result.routine, routine)
       assert.equal(result.awaitingConfirmation, status === 'awaiting_confirmation')
       assert.equal(result.draftId, status === 'awaiting_confirmation' ? 'preview-1' : null)
+      assert.equal(fetch.mock.callCount(), 1)
     } finally {
       fetch.mock.restore()
     }
   }
 })
 
-test('direct routine save posts the draft identity without a chat query', async () => {
+test('direct routine save puts the entire preview with its user and draft scope without a chat query', async () => {
   const routine = {
     name: 'Push', recovery: 'Rest.',
     days: [{
@@ -173,20 +239,21 @@ test('direct routine save posts the draft identity without a chat query', async 
   }
   for (const language of ['EN', 'ES']) {
     const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
-      assert.equal(url, '/api/test%20session/routine/save')
-      assert.equal(options.method, 'POST')
-      assert.deepEqual(JSON.parse(options.body), { user_id: 7, draft_id: 'draft-1', language })
-      return Response.json({
-        subsystem: 'routine_maker',
-        response: { status: 'saved', message: 'Saved.', routine, routine_id: 8, draft_id: null },
+      const parsed = new URL(url, 'http://localhost')
+      assert.equal(parsed.pathname, '/api/users/7/routine')
+      assert.deepEqual(Object.fromEntries(parsed.searchParams), {
+        session_id: 'test session', draft_id: 'draft-1', language,
       })
+      assert.equal(options.method, 'PUT')
+      assert.equal(options.headers['Content-Type'], 'application/json')
+      assert.deepEqual(JSON.parse(options.body), routine)
+      return Response.json(routine)
     })
     try {
-      const result = await chat.requestRoutineSave('test session', 'draft-1', new AbortController().signal, language, 7)
-      assert.equal(result.routineId, 8)
+      const result = await chat.requestRoutineSave('test session', routine, 'draft-1', new AbortController().signal, language, 7)
       assert.equal(result.awaitingConfirmation, false)
-      assert.equal(result.content, 'Saved.')
-      assert.deepEqual(result.savedRoutine, { id: 8, name: 'Push' })
+      assert.ok(result.content.includes(language === 'ES' ? 'Guardada' : 'Saved'))
+      assert.deepEqual(result.savedRoutine, { name: 'Push' })
       assert.deepEqual(result.routine, routine)
       assert.equal(fetch.mock.callCount(), 1)
     } finally {
@@ -231,10 +298,21 @@ test('routine JSON renders localized metadata, day tabs and exercise tables inst
         assert.equal(markup.split(routine.summary).length - 1, 1)
         assert.ok(!markup.includes('901') && !markup.includes('KG') && !markup.includes('DONE'))
         assert.ok(!markup.includes('## Balanced week') && !markup.includes('[object Object]'))
-        const restored = JSON.parse(JSON.stringify({ ...chat.initialRoutine, generated: result.routine }))
-        const myRoutine = renderToStaticMarkup(createElement(RoutineView, { routine: restored }))
-        assert.match(myRoutine, /class="routine-maker"/)
+        const restored = routineData.toWorkoutRoutine(result.routine)
+        const myRoutine = renderToStaticMarkup(createElement(RoutineView, { routine: restored, workoutSession: { isWorkoutActive: false } }))
+        assert.match(myRoutine, /class="routine-view"/)
+        assert.match(myRoutine, /class="workout-card"/)
+        assert.ok(!myRoutine.includes('class="routine-maker"'))
+        assert.ok(!myRoutine.includes('Demo workout') && !myRoutine.includes('Entrenamiento de ejemplo'))
+        assert.equal((myRoutine.match(/role="tab"/g) || []).length, count)
+        assert.ok(myRoutine.includes('Catalog Press'))
+        assert.ok(myRoutine.includes('Use controlled movements.'))
+        assert.ok(myRoutine.includes('Rest between training days.'))
         assert.ok(myRoutine.includes(routine.summary))
+        assert.deepEqual(restored.days[0].exercises[0], {
+          exerciseId: 901, name: 'Catalog Press', sets: 4, reps: '8-12', rest: '90s',
+          notes: 'Use controlled movements.', weight: 0, completed: false,
+        })
       } finally {
         fetch.mock.restore()
       }
@@ -268,7 +346,7 @@ test('routine JSON rejects malformed days, duplicate exercises and invalid targe
   }
 })
 
-test('saved JSON recommendations restore while older Markdown recommendations remain readable', async () => {
+test('My Routine does not render device-only routine data as the saved plan', async () => {
   await translations.setLanguage('en')
   const routine = {
     name: 'Saved plan', summary: 'A short explanation.', recovery: 'Rest between days.',
@@ -277,23 +355,15 @@ test('saved JSON recommendations restore while older Markdown recommendations re
       exercises: [{ exercise_id: 1, name: 'Catalog Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
     }],
   }
-  const storageKey = 'form-routine-v1:77'
-  try {
-    for (const generated of [routine, '## Previous recommendation\n\nUse controlled reps.']) {
-      const stored = { ...chat.initialRoutine, generated }
-      storage.set(storageKey, JSON.stringify(stored))
-      const markup = renderToStaticMarkup(createElement(ThemeContext.Provider, {
-        value: { theme: 'light', resolvedTheme: 'light', setTheme: () => {} },
-      }, createElement(MainView, { user: { id: 77, username: 'Test User' }, onSwitchUser: () => {} })))
-      assert.ok(!markup.includes('Could not restore your routine'))
-      assert.deepEqual(JSON.parse(storage.get(storageKey)), stored)
-      const view = renderToStaticMarkup(createElement(RoutineView, { routine: stored }))
-      assert.ok(view.includes(typeof generated === 'string' ? 'Previous recommendation' : 'A short explanation.'))
-      assert.ok(!view.includes('[object Object]'))
-    }
-  } finally {
-    storage.delete(storageKey)
-  }
+  const stored = { ...chat.initialRoutine, generated: routine }
+  storage.set('form-routine-v1:77', JSON.stringify(stored))
+  const markup = renderToStaticMarkup(createElement(ThemeContext.Provider, {
+    value: { theme: 'light', resolvedTheme: 'light', setTheme: () => {} },
+  }, createElement(MainView, { user: { id: 77, username: 'Test User' }, onSwitchUser: () => {} })))
+  assert.ok(!markup.includes('A short explanation.'))
+  assert.ok(!markup.includes('Could not restore your routine'))
+  assert.deepEqual(JSON.parse(storage.get('form-routine-v1:77')), stored)
+  storage.delete('form-routine-v1:77')
 })
 
 test('button and chat saves render the same localized confirmation without repeating the plan', async () => {
@@ -306,15 +376,25 @@ test('button and chat saves render the same localized confirmation without repea
   }
   for (const language of ['en', 'es']) {
     await translations.setLanguage(language)
-    const message = language === 'en' ? 'Selected as your current routine.' : 'Seleccionada como tu rutina actual.'
-    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
-      subsystem: 'routine_maker',
-      response: { status: 'saved', message, routine, routine_id: 42, draft_id: null },
-    }))
+    const message = translations.default.getFixedT(language)('Saved as a new version and selected as your current routine.')
+    const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
+      if (url.endsWith('/chat')) {
+        assert.equal(JSON.parse(options.body).client_saves_routine, true)
+        return Response.json({
+          subsystem: 'routine_maker',
+          response: { status: 'save_requested', message: 'Saving…', routine, routine_id: null, draft_id: 'draft' },
+        })
+      }
+      assert.equal(options.method, 'PUT')
+      assert.equal(new URL(url, 'http://localhost').pathname, '/api/users/7/routine')
+      assert.deepEqual(JSON.parse(options.body), routine)
+      return Response.json(routine)
+    })
     try {
       const signal = new AbortController().signal
-      const buttonSave = await chat.requestRoutineSave('session', 'draft', signal, language.toUpperCase(), 7)
+      const buttonSave = await chat.requestRoutineSave('session', routine, 'draft', signal, language.toUpperCase(), 7)
       const chatSave = await chat.requestChat('Save this routine', 'session', signal, language.toUpperCase(), 7)
+      assert.equal(fetch.mock.callCount(), 3)
       const render = (result) => renderToStaticMarkup(createElement(SubsystemResponse, result))
       const markup = render(buttonSave)
       assert.equal(markup, render(chatSave))
@@ -332,7 +412,7 @@ test('button and chat saves render the same localized confirmation without repea
   }
 })
 
-test('saved routine responses require a valid routine and database ID for either save path', async () => {
+test('legacy saved chat responses still require a valid database ID', async () => {
   for (const routineId of [null, 0, '42']) {
     const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
       subsystem: 'routine_maker',
@@ -351,7 +431,6 @@ test('saved routine responses require a valid routine and database ID for either
       await translations.setLanguage('en')
       const signal = new AbortController().signal
       await assert.rejects(chat.requestChat('Save it', 'session', signal, 'EN', 7), /invalid response/)
-      await assert.rejects(chat.requestRoutineSave('session', 'draft', signal, 'EN', 7), /invalid response/)
     } finally {
       fetch.mock.restore()
     }
@@ -359,16 +438,76 @@ test('saved routine responses require a valid routine and database ID for either
 })
 
 test('direct save surfaces stale drafts and server failures without falling back to chat', async () => {
+  const routine = {
+    name: 'Push', recovery: 'Rest.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
   for (const status of [422, 500]) {
     const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
       detail: [{ msg: 'This draft is no longer available.' }],
     }, { status }))
     try {
       await assert.rejects(
-        chat.requestRoutineSave('session', 'old-draft', new AbortController().signal, 'EN', 7),
+        chat.requestRoutineSave('session', routine, 'old-draft', new AbortController().signal, 'EN', 7),
         new RegExp(`HTTP ${status}`),
       )
       assert.equal(fetch.mock.callCount(), 1)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+})
+
+test('chat save failures retain a retryable preview and never return a saved confirmation', async () => {
+  const routine = {
+    name: 'Push', recovery: 'Rest.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  const fetch = mock.method(globalThis, 'fetch', async (url) => {
+    if (url.endsWith('/chat')) return Response.json({
+      subsystem: 'routine_maker',
+      response: { status: 'save_requested', message: 'Saving…', routine, draft_id: 'draft', routine_id: null },
+    })
+    return Response.json({ detail: 'Database unavailable' }, { status: 500 })
+  })
+  try {
+    await assert.rejects(
+      chat.requestChat('Save it', 'session', new AbortController().signal, 'EN', 7),
+      (error) => {
+        assert.match(error.message, /HTTP 500/)
+        assert.equal(error.routineToSave.savedRoutine, null)
+        assert.deepEqual(error.routineToSave.routine, routine)
+        assert.equal(error.routineToSave.draftId, 'draft')
+        return true
+      },
+    )
+    assert.equal(fetch.mock.callCount(), 2)
+  } finally {
+    fetch.mock.restore()
+  }
+})
+
+test('PUT save rejects invalid or empty responses without reporting success', async () => {
+  const routine = {
+    name: 'Push', recovery: 'Rest.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  for (const response of [null, {}, { routine }]) {
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json(response))
+    try {
+      await assert.rejects(
+        chat.requestRoutineSave('session', routine, 'draft', new AbortController().signal, 'EN', 7),
+        /invalid routine/,
+      )
     } finally {
       fetch.mock.restore()
     }
@@ -421,8 +560,81 @@ test('profile registration and every activation use the selected user ID and set
     assert.deepEqual(calls.map(({ url }) => url), [
       '/api/users', '/api/7/key', '/api/1/key', '/api/7/key', '/api/7/chat', '/api/7/key?reset=true',
     ])
-    assert.deepEqual(JSON.parse(calls[4].options.body), { query: 'Hi', language: 'EN', user_id: 7 })
+    assert.deepEqual(JSON.parse(calls[4].options.body), { query: 'Hi', language: 'EN', user_id: 7, client_saves_routine: true })
     assert.ok(calls.every(({ options }) => options.method === 'POST'))
+  } finally {
+    fetch.mock.restore()
+  }
+})
+
+test('active routine fetch validates and returns the selected user’s saved plan', async () => {
+  const routine = {
+    name: 'Saved plan', recovery: 'Rest between days.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/api/users/7/routine')
+    assert.equal(options.method, undefined)
+    return Response.json(routine)
+  })
+  try {
+    assert.deepEqual(await usersApi.getUserRoutine(7, new AbortController().signal), routine)
+    fetch.mock.mockImplementation(async () => Response.json(null))
+    assert.equal(await usersApi.getUserRoutine(7), null)
+    await assert.rejects(usersApi.getUserRoutine(0), /positive integer/)
+    fetch.mock.mockImplementation(async () => Response.json({ invalid: true }))
+    await assert.rejects(usersApi.getUserRoutine(7), /invalid routine/)
+  } finally {
+    fetch.mock.restore()
+  }
+})
+
+test('edited workout plans preserve catalog references and save through PUT without chat draft parameters', async () => {
+  const plan = {
+    name: 'Saved plan', summary: 'A balanced week.', recovery: 'Rest between days.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [
+        { exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: 'Stay controlled.' },
+        { exercise_id: 2, name: 'Overhead Press', sets: 2, reps: '10', rest_seconds: 60, notes: '' },
+      ],
+    }],
+  }
+  const original = structuredClone(plan)
+  const workout = routineData.toWorkoutRoutine(plan)
+  assert.equal(workout.days[0].exercises[0].exerciseId, 1)
+  assert.deepEqual(routineData.toRoutinePlan(workout), plan)
+  workout.days[0].exercises.reverse()
+  workout.days[0].exercises[0].sets = '4'
+  workout.days[0].exercises[0].weight = 12.5
+  workout.days[0].exercises[0].completed = true
+  const edited = routineData.toRoutinePlan(workout)
+  assert.deepEqual(edited.days[0].exercises.map((exercise) => exercise.exercise_id), [2, 1])
+  assert.equal(edited.days[0].exercises[0].sets, 4)
+  assert.ok(!JSON.stringify(edited).includes('weight') && !JSON.stringify(edited).includes('completed'))
+  assert.deepEqual(plan, original)
+  const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/api/users/7/routine')
+    assert.equal(options.method, 'PUT')
+    assert.deepEqual(JSON.parse(options.body), edited)
+    return Response.json(edited)
+  })
+  try {
+    assert.deepEqual(await usersApi.saveUserRoutine(7, edited), edited)
+    assert.equal(fetch.mock.callCount(), 1)
+    workout.days[0].exercises[0].exerciseId = null
+    assert.throws(() => routineData.toRoutinePlan(workout), /Custom exercises cannot be saved/)
+    workout.days[0].exercises = []
+    assert.throws(() => routineData.toRoutinePlan(workout), /Each day needs exercises/)
+    workout.days[0].exercises = [
+      routineData.toWorkoutRoutine(plan).days[0].exercises[0],
+      routineData.toWorkoutRoutine(plan).days[0].exercises[0],
+    ]
+    assert.throws(() => routineData.toRoutinePlan(workout), /no duplicates/)
+    assert.equal(fetch.mock.callCount(), 1)
   } finally {
     fetch.mock.restore()
   }

@@ -25,6 +25,8 @@ def save_draft(
     user_id: int,
     language: str = "EN",
     draft_id: str | None = None,
+    defer_save: bool = False,
+    routine: RoutinePlan | None = None,
 ) -> RoutineMakerResult:
     """Persist the cached preview without invoking a model."""
     if not isinstance(session_id, str) or not session_id.strip():
@@ -36,6 +38,8 @@ def save_draft(
     state = RoutineState.model_validate_json(cached) if cached else RoutineState()
     if draft_id is not None and draft_id != state.draft_id:
         raise RoutineInputError("This draft is no longer available. Review the latest routine preview.")
+    if routine is not None and routine != state.routine:
+        raise RoutineInputError("The submitted routine does not match the latest routine preview.")
     already_saved = draft_id is not None and state.saved_routine_id is not None
     if (
         (not state.awaiting_confirmation and not already_saved)
@@ -47,6 +51,13 @@ def save_draft(
             if language == "ES" else
             "There is no draft awaiting confirmation. Generate or modify a routine first.",
             state.routine,
+        )
+    if defer_save:
+        return RoutineMakerResult(
+            "save_requested", state.parameters,
+            "Guardando la rutina confirmada."
+            if language == "ES" else "Saving the confirmed routine.",
+            state.routine, draft_id=state.draft_id,
         )
     if not already_saved:
         state.saved_routine_id = repository.save(
@@ -74,6 +85,7 @@ def handle(
     parameters: RoutineParameters | Mapping[str, object] | None = None,
     routine: RoutinePlan | None = None,
     language: str = "EN",
+    client_saves_routine: bool = False,
 ) -> RoutineMakerResult:
     """Classify first, validate, collect requirements, then preview or confirm a save."""
     if not isinstance(query, str) or not query.strip():
@@ -126,6 +138,7 @@ def handle(
         return save_draft(
             repository=repository, state_store=state_store,
             session_id=session_id, user_id=user_id, language=language,
+            defer_save=client_saves_routine,
         )
 
     loaded_parameters: RoutineParameters | None = None

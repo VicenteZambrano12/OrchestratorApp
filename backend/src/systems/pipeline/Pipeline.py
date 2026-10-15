@@ -57,6 +57,7 @@ class Pipeline:
         history: str | None = None,
         session_id: str | None = None,
         user_id: int | None = None,
+        client_saves_routine: bool = False,
     ) -> str | RoutineMakerResult | list[ExerciseExplanation]:
         """Return the selected system's result, or a localized no-match message.
 
@@ -72,6 +73,7 @@ class Pipeline:
             history=history,
             session_id=session_id,
             user_id=user_id,
+            **({"client_saves_routine": True} if client_saves_routine else {}),
         ).response
 
     def handle_with_subsystem(
@@ -84,6 +86,7 @@ class Pipeline:
         history: str | None = None,
         session_id: str | None = None,
         user_id: int | None = None,
+        client_saves_routine: bool = False,
     ) -> PipelineResult:
         """Route once and return the selected subsystem with its unchanged result.
 
@@ -108,6 +111,7 @@ class Pipeline:
             memory=memory,
             session_id=session_id,
             user_id=user_id,
+            **({"client_saves_routine": True} if client_saves_routine else {}),
         )
         if session_id is not None and self._turn_setter is not None:
             response = result.response

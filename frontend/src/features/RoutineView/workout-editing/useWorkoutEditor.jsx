@@ -1,40 +1,31 @@
 import { useState } from 'react'
+import { isValidExercise, updateDayExercises, moveExercise } from './workoutEditing'
 
 export function useWorkoutEditor({ routine, dayIndex, setRoutine, onSave }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(null)
-  const [validation, setValidation] = useState('')
-  const displayed = editing ? draft : routine
+  const [isEditing, setIsEditing] = useState(false)
+  const validation = routine.days.some((day) => day.exercises.some((exercise) => !isValidExercise(exercise)))
+    ? 'Enter 1–20 sets, a rep target, and a weight of at least 0 kg.' : ''
 
-  function startEditing() {
-    setDraft(structuredClone(routine))
-    setEditing(true)
-  }
-
-  function cancelEditing() {
-    setEditing(false)
-    setValidation('')
+  function updateExercises(update) {
+    const next = updateDayExercises(routine, dayIndex, update)
+    setRoutine(next)
+    if (next.days.every((day) => day.exercises.every(isValidExercise))) onSave?.(next)
   }
 
   function changeExercise(index, field, value) {
-    setDraft((current) => ({ ...current, days: current.days.map((item, i) => i === dayIndex
-      ? { ...item, exercises: item.exercises.map((exercise, j) => j === index ? { ...exercise, [field]: value } : exercise) }
-      : item) }))
+    updateExercises((exercises) => exercises.map((exercise, i) => i === index ? { ...exercise, [field]: value } : exercise))
   }
 
-  function saveEdits() {
-    if (draft.days.some((item) => item.exercises.some((exercise) => !Number.isInteger(Number(exercise.sets)) ||
-      Number(exercise.sets) < 1 || Number(exercise.sets) > 10 || !exercise.reps.trim() ||
-      exercise.weight === '' || !Number.isFinite(Number(exercise.weight)) || Number(exercise.weight) < 0))) {
-      setValidation('Enter 1–10 sets, a rep target, and a weight of at least 0 kg.')
-      return
-    }
-    const next = { ...draft, days: draft.days.map((item) => ({ ...item, exercises: item.exercises.map((exercise) => ({ ...exercise, sets: Number(exercise.sets), weight: Number(exercise.weight) })) })) }
-    setRoutine(next)
-    onSave(next)
-    setEditing(false)
-    setValidation('')
+  function toggleEditing() {
+    if (!isEditing || !validation) setIsEditing(!isEditing)
   }
 
-  return { editing, displayed, validation, startEditing, cancelEditing, changeExercise, saveEdits }
+  return {
+    isEditing, validation, toggleEditing, changeExercise,
+    addExercise: (exercise) => updateExercises((exercises) => [...exercises, exercise]),
+    swapExercise: (index, replacement) => updateExercises((exercises) => exercises.map((exercise, i) => i === index
+      ? { ...exercise, ...replacement, weight: 0, completed: false, muscle: '', notes: '' } : exercise)),
+    removeExercise: (index) => updateExercises((exercises) => exercises.filter((_, i) => i !== index)),
+    reorderExercise: (from, to) => updateExercises((exercises) => moveExercise(exercises, from, to)),
+  }
 }

@@ -98,8 +98,8 @@ def chat(
 ) -> ChatResponse:
     """Route a question and execute the selected gym-assistance system.
 
-    **Business rules:** `query` and `language` are both required; only optional
-    `user_id` is also accepted. Other fields are rejected. Queries cannot be blank.
+    **Business rules:** `query` and `language` are both required; optional
+    `user_id` and `client_saves_routine` are also accepted. Other fields are rejected. Queries cannot be blank.
     Language must be `ES` or `EN`.
     The query is passed through unchanged, including surrounding whitespace.
     The `id` path parameter is required and identifies the caller's session.
@@ -123,6 +123,9 @@ def chat(
     An explicit confirmation on a later turn saves a new active version;
     previous versions are preserved but deactivated. The direct routine/save
     endpoint confirms a preview without routing or LLM calls.
+    With `client_saves_routine: true`, confirmation instead returns
+    `save_requested` with the routine and draft ID without writing SQLite.
+    The client completes the save through `PUT /users/{user_id}/routine`.
 
     **Side effects:** routing and selected systems may call Gemini and consume
     provider quota. Successful turns are stored for follow-up explanations.
@@ -139,6 +142,7 @@ def chat(
         result = pipeline.handle_with_subsystem(
             request.query, request.language, session_id=id,
             **({"user_id": request.user_id} if request.user_id is not None else {}),
+            **({"client_saves_routine": True} if request.client_saves_routine else {}),
         )
     except RoutineInputError as error:
         raise HTTPException(status_code=422, detail=[{

@@ -41,6 +41,7 @@ class RoutineMaker:
         parameters: RoutineParameters | Mapping[str, object] | None = None,
         routine: RoutinePlan | None = None,
         language: str = "EN",
+        client_saves_routine: bool = False,
     ) -> RoutineMakerResult:
         """Generate database-backed drafts; save a new version only on confirmation."""
         if self._state_store is None:
@@ -57,4 +58,5 @@ class RoutineMaker:
             parameters=parameters,
             routine=routine,
             language=language,
+            client_saves_routine=client_saves_routine,
         )

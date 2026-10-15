@@ -1,6 +1,7 @@
 import i18n from 'i18next'
 import { isExerciseList } from '../../ExplainerCard/exercise-data/exerciseData'
 import { isRoutinePlan } from '../../RoutineMaker/routine-data/routineData'
+import { saveUserRoutine } from '../../../hooks/session/users'
 
 export const subsystemNames = {
   routine_maker: 'Routine maker',
@@ -61,25 +62,36 @@ export async function demoReply(query, signal) {
 }
 
 export async function requestChat(query, sessionId, signal, language, userId) {
-  return requestChatAction(
+  const result = await requestChatAction(
     `${encodeURIComponent(sessionId)}/chat`,
-    { query, language, ...(userId === undefined ? {} : { user_id: userId }) },
+    { query, language, ...(userId === undefined ? {} : { user_id: userId, client_saves_routine: true }) },
     signal, language, userId,
   )
+  if (!result.saveRequested) return result
+  try {
+    signal?.throwIfAborted()
+    return await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId)
+  } catch (error) {
+    error.routineToSave = result
+    throw error
+  }
 }
 
-export async function requestRoutineSave(sessionId, draftId, signal, language, userId) {
+export async function requestRoutineSave(sessionId, routine, draftId, signal, language, userId) {
+  if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
   if (!Number.isSafeInteger(userId) || userId < 1) throw new Error('Routine user ID must be a positive integer.')
+  if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
   if (typeof draftId !== 'string' || !draftId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
-  const result = await requestChatAction(
-    `${encodeURIComponent(sessionId)}/routine/save`,
-    { user_id: userId, draft_id: draftId, language },
-    signal, language, userId,
-  )
-  if (!result.routine || !Number.isSafeInteger(result.routineId) || result.routineId < 1) {
-    throw new Error(result.content || i18n.t('The chat API returned an invalid response.'))
+  const saved = await saveUserRoutine(userId, routine, signal, { sessionId, draftId, language })
+  const t = i18n.getFixedT(language.toLowerCase())
+  return {
+    subsystem: 'routine_maker',
+    content: t('Saved as a new version and selected as your current routine.'),
+    routine: saved,
+    savedRoutine: { name: saved.name },
+    awaitingConfirmation: false,
+    draftId: null,
   }
-  return result
 }
 
 async function requestChatAction(path, payload, signal, language, userId) {
@@ -125,14 +137,14 @@ async function requestChatAction(path, payload, signal, language, userId) {
     }
     const result = data.response
     if (!result || typeof result.message !== 'string' ||
-      !['awaiting_confirmation', 'saved', 'needs_parameters', 'needs_changes', 'needs_routine', 'no_match'].includes(result.status)) {
+      !['awaiting_confirmation', 'save_requested', 'saved', 'needs_parameters', 'needs_changes', 'needs_routine', 'no_match'].includes(result.status)) {
       throw new Error(t('The chat API returned an invalid response.'))
     }
     const routine = result.routine
     if (routine !== null && !isRoutinePlan(routine)) {
       throw new Error(t('The chat API returned an invalid response.'))
     }
-    if (result.status === 'awaiting_confirmation' &&
+    if (['awaiting_confirmation', 'save_requested'].includes(result.status) &&
       (!routine || typeof result.draft_id !== 'string' || !result.draft_id.trim())) {
       throw new Error(t('The chat API returned an invalid response.'))
     }
@@ -146,6 +158,7 @@ async function requestChatAction(path, payload, signal, language, userId) {
       routine,
       savedRoutine: result.status === 'saved' ? { id: result.routine_id, name: result.routine.name } : null,
       awaitingConfirmation: result.status === 'awaiting_confirmation',
+      saveRequested: result.status === 'save_requested',
       routineId: result.routine_id,
       draftId: result.draft_id,
     }

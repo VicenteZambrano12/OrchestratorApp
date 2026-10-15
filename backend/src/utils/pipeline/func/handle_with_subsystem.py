@@ -24,6 +24,7 @@ def handle_with_subsystem(
     memory: list[dict[str, object]] | None = None,
     session_id: str | None = None,
     user_id: int | None = None,
+    client_saves_routine: bool = False,
 ) -> PipelineResult:
     """Route once and execute a system, caching dependencies on the pipeline."""
     if not isinstance(query, str) or not query.strip():
@@ -55,6 +56,7 @@ def handle_with_subsystem(
             response=pipeline._routine_maker.handle(
                 query, parameters=parameters, routine=routine, language=language,
                 session_id=session_id, user_id=user_id,
+                **({"client_saves_routine": True} if client_saves_routine else {}),
             ),
         )
     if target == "exercise_explainer":

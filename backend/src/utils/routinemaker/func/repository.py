@@ -2,6 +2,7 @@ import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from uuid import uuid4
 
 from utils.routinemaker.dataclass.models import RoutineParameters, RoutinePlan
 
@@ -50,6 +51,23 @@ class RoutineRepository:
                 (user_id,),
             )]
 
+    def active_routine(self, user_id: int) -> RoutinePlan | None:
+        record = self.active_routine_record(user_id)
+        return record[1] if record is not None else None
+
+    def active_routine_record(self, user_id: int) -> tuple[int, RoutinePlan] | None:
+        self.validate_user(user_id)
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT id, description FROM dim_routines "
+                "WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        stored = json.loads(row["description"])
+        return row["id"], RoutinePlan.model_validate(stored["routine"])
+
     def load(self, user_id: int, routine_id: int) -> tuple[RoutinePlan, RoutineParameters]:
         with closing(self._connect()) as db:
             row = db.execute(
@@ -65,6 +83,13 @@ class RoutineRepository:
         RoutinePlan.model_validate(
             plan, context={"parameters": parameters, "catalog": self.catalog(parameters)},
         )
+
+    def set_active_routine(self, user_id: int, plan: RoutinePlan) -> int:
+        parameters = RoutineParameters(
+            days_per_week=len(plan.days),
+            hours_per_session=max(day.duration_minutes for day in plan.days) / 60,
+        )
+        return self.save(user_id, plan, parameters, str(uuid4()), None)
 
     def save(
         self, user_id: int, plan: RoutinePlan, parameters: RoutineParameters,

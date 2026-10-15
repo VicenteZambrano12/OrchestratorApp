@@ -198,9 +198,9 @@ class RoutineMakerResult:
     )
 
     status: Annotated[
-        Literal["needs_parameters", "needs_changes", "needs_routine", "awaiting_confirmation", "saved", "no_match"],
+        Literal["needs_parameters", "needs_changes", "needs_routine", "awaiting_confirmation", "save_requested", "saved", "no_match"],
         Field(
-            description="Draft workflow outcome. Only saved indicates a database write.",
+            description="Draft workflow outcome. save_requested asks the client to persist the confirmed draft; only saved indicates a database write.",
             examples=["needs_parameters", "awaiting_confirmation", "saved"],
         ),
     ]

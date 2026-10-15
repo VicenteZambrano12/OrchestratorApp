@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import i18n from '../../i18n'
 import {
   Activity, ArrowRight, ArrowUp,
   ChevronRight, CircleHelp, Dumbbell, Flame,
@@ -16,29 +15,10 @@ import RoutineView from '../../components/RoutineView/RoutineView'
 import { SubsystemResponse } from '../../features/ai-chat/components/SubsystemResponse'
 import { initialMessages, initialRoutine, requestChat, requestRoutineSave } from '../../features/ai-chat/api/chat'
 import UserDialog from '../../components/UserDialog/UserDialog'
-import { setSessionKey } from '../../hooks/session/users'
-import { isRoutinePlan } from '../../features/RoutineMaker/routine-data/routineData'
-
-function loadRoutine(routineStorageKey) {
-  try {
-    const saved = localStorage.getItem(routineStorageKey)
-    if (!saved) return { routine: initialRoutine, error: '' }
-    const routine = JSON.parse(saved)
-    if (!Array.isArray(routine.days) || routine.days.length !== 3 ||
-      !routine.days.every((day) => typeof day.name === 'string' && Array.isArray(day.exercises) &&
-        day.exercises.every((exercise) => typeof exercise.name === 'string' &&
-          Number.isInteger(exercise.sets) && exercise.sets >= 1 && exercise.sets <= 10 &&
-          typeof exercise.reps === 'string' && exercise.reps.trim() &&
-          Number.isFinite(exercise.weight) && exercise.weight >= 0 &&
-          typeof exercise.completed === 'boolean')) ||
-      (typeof routine.generated !== 'string' && !isRoutinePlan(routine.generated))) {
-      throw new Error('The saved routine is not valid.')
-    }
-    return { routine, error: '' }
-  } catch (error) {
-    return { routine: initialRoutine, error: i18n.t('Could not restore your routine: {{message}}', { message: i18n.t(error.message) }) }
-  }
-}
+import { getUserRoutine, saveUserRoutine, setSessionKey } from '../../hooks/session/users'
+import { toRoutinePlan, toWorkoutRoutine } from '../../features/RoutineMaker/routine-data/routineData'
+import { useWorkoutSession } from '../../features/RoutineView/workout-session/useWorkoutSession'
+import { saveWorkout } from '../../features/RoutineView/workout-session/workoutApi'
 
 function HelpDialog({ onClose }) {
   const { t } = useTranslation()
@@ -57,7 +37,7 @@ function HelpDialog({ onClose }) {
       <BrandMark /><h2 id="help-title">{t('Meet your new training partner.')}</h2>
       <p>{t('Use AI Chat for workout ideas, exercise explanations, and progress reviews. Expand the pipeline to see which specialist handled a request.')}</p>
       <p>{t('Requests use your selected language. Include any relevant history or routine in your message.')}</p>
-      <p>{t('My Routine is an editable demo workout. Your sets, weights, completion, and saved coach recommendation stay on this device.')}</p>
+      <p>{t('My Routine shows the active routine saved to your profile.')}</p>
       <p>{t('Exercise explanations include interactive cards with images, instructions, and coach insights. Other responses use Markdown.')}</p>
       <button className="primary-button" onClick={onClose}>{t('Got it')} <ArrowRight size={16} /></button>
     </section>
@@ -67,18 +47,24 @@ function HelpDialog({ onClose }) {
 function MainView({ user, onSwitchUser }) {
   const { t, i18n } = useTranslation()
   const language = i18n.resolvedLanguage.toUpperCase()
-  const routineStorageKey = `form-routine-v1:${user.id}`
   const initials = user.username.trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()
-  const [restored] = useState(() => loadRoutine(routineStorageKey))
   const [tab, setTab] = useState('chat')
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
   const [savingRoutine, setSavingRoutine] = useState(false)
   const [backendDown, setBackendDown] = useState(false)
-  const [routine, setRoutine] = useState(restored.routine)
-  const [error, setError] = useState(restored.error)
-  const [saved, setSaved] = useState(false)
+  const [routine] = useState(initialRoutine)
+  const [error, setError] = useState('')
+  const [activeRoutine, setActiveRoutine] = useState(null)
+  const [activeRoutineId, setActiveRoutineId] = useState(null)
+  const workoutSession = useWorkoutSession()
+  const workoutActiveRef = useRef(false)
+  const [workout, setWorkout] = useState(null)
+  const [workoutSaved, setWorkoutSaved] = useState(false)
+  const [workoutUpdated, setWorkoutUpdated] = useState(false)
+  const [routineLoading, setRoutineLoading] = useState(false)
+  const [routineError, setRoutineError] = useState('')
   const [help, setHelp] = useState(false)
   const [userDialog, setUserDialog] = useState(false)
   const sessionId = String(user.id)
@@ -86,25 +72,64 @@ function MainView({ user, onSwitchUser }) {
   const conversationRef = useRef(null)
   const inputRef = useRef(null)
   const abortRef = useRef(null)
+  const routineAbortRef = useRef(null)
+  const updateAbortRef = useRef(null)
+  const workoutAbortRef = useRef(null)
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => {
+    workoutActiveRef.current = workoutSession.isWorkoutActive
+  }, [workoutSession.isWorkoutActive])
+
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    routineAbortRef.current?.abort()
+    updateAbortRef.current?.abort()
+    workoutAbortRef.current?.abort()
+  }, [])
+
+  function loadActiveRoutine() {
+    if (workoutSession.isWorkoutActive) return
+    routineAbortRef.current?.abort()
+    const controller = new AbortController()
+    routineAbortRef.current = controller
+    setRoutineLoading(true)
+    setRoutineError('')
+    getUserRoutine(user.id, controller.signal, { includeMetadata: true })
+      .then(({ routine: loadedRoutine, routineId }) => {
+        if (controller.signal.aborted) return
+        if (routineId !== activeRoutineId || JSON.stringify(loadedRoutine) !== JSON.stringify(activeRoutine)) {
+          setWorkout(loadedRoutine ? toWorkoutRoutine(loadedRoutine) : null)
+          setWorkoutSaved(false)
+          setWorkoutUpdated(false)
+        }
+        setActiveRoutine(loadedRoutine)
+        setActiveRoutineId(routineId)
+      })
+      .catch((requestError) => {
+        if (!controller.signal.aborted) {
+          setActiveRoutine(null)
+          setActiveRoutineId(null)
+          setWorkout(null)
+          setWorkoutSaved(false)
+          setWorkoutUpdated(false)
+          setRoutineError(requestError.message)
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRoutineLoading(false)
+      })
+  }
+
+  function openRoutine() {
+    setTab('routine')
+    loadActiveRoutine()
+  }
   useEffect(() => {
     if (messages.length > initialMessages.length || pending) {
       const conversation = conversationRef.current
       conversation?.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })
     }
   }, [messages, pending])
-
-  function saveRoutine(next) {
-    try {
-      localStorage.setItem(routineStorageKey, JSON.stringify(next))
-      setSaved(true)
-      setError('')
-    } catch (storageError) {
-      setSaved(false)
-      setError(t('Could not save on this device: {{message}}', { message: storageError.message }))
-    }
-  }
 
   function askCoach(prompt) {
     setInput(prompt)
@@ -113,11 +138,16 @@ function MainView({ user, onSwitchUser }) {
   }
 
   function receiveResponse(result) {
-    if (result.savedRoutine) {
-      const next = { ...routine, generated: result.routine }
-      setRoutine(next)
-      saveRoutine(next)
+    if (result.savedRoutine && !workoutActiveRef.current) {
       setLastQuery('')
+      routineAbortRef.current?.abort()
+      setRoutineLoading(false)
+      setRoutineError('')
+      setActiveRoutine(result.routine)
+      setActiveRoutineId(null)
+      setWorkout(toWorkoutRoutine(result.routine))
+      setWorkoutSaved(false)
+      setWorkoutUpdated(false)
     }
     setMessages((current) => [
       ...current.map((message) => result.savedRoutine ? { ...message, awaitingConfirmation: false } : message),
@@ -149,6 +179,12 @@ function MainView({ user, onSwitchUser }) {
       receiveResponse(result)
     } catch (requestError) {
       if (controller.signal.aborted) return
+      if (requestError.routineToSave) {
+        receiveResponse({ ...requestError.routineToSave, content: '', awaitingConfirmation: true, saveRequested: false })
+        setLastQuery('')
+        setError(t('Could not save routine: {{message}}', { message: requestError.message }))
+        return
+      }
       if (requestError.backendDown) setBackendDown(true)
       else if (requestError.name !== 'AbortError') setError(`${t(requestError.message)} ${t('Your message was not answered. You can retry it below.')}`)
       if (!isRetry) setInput(query)
@@ -185,7 +221,7 @@ function MainView({ user, onSwitchUser }) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const result = await requestRoutineSave(sessionId, message.draftId, controller.signal, language, user.id)
+      const result = await requestRoutineSave(sessionId, message.routine, message.draftId, controller.signal, language, user.id)
       if (controller.signal.aborted) return
       receiveResponse(result)
     } catch (requestError) {
@@ -196,13 +232,36 @@ function MainView({ user, onSwitchUser }) {
     }
   }
 
+  async function updateWorkout(editedRoutine) {
+    const plan = toRoutinePlan(editedRoutine)
+    const controller = new AbortController()
+    updateAbortRef.current = controller
+    const { routine: saved, routineId } = await saveUserRoutine(user.id, plan, controller.signal, { includeMetadata: true })
+    controller.signal.throwIfAborted()
+    routineAbortRef.current?.abort()
+    setRoutineLoading(false)
+    setRoutineError('')
+    setActiveRoutine(saved)
+    setActiveRoutineId(routineId)
+    setWorkoutSaved(true)
+    setWorkoutUpdated(true)
+  }
+
+  async function finishWorkout(sets) {
+    const controller = new AbortController()
+    workoutAbortRef.current = controller
+    const result = await saveWorkout(user.id, activeRoutineId, sets, controller.signal)
+    controller.signal.throwIfAborted()
+    return result
+  }
+
   if (backendDown) return <FailingView onRetry={() => setBackendDown(false)} />
 
   return <div className={`app-shell${tab === 'chat' ? ' chat-shell' : ''}`}>
     <aside className="sidebar">
       <a className="brand" href="#chat" onClick={() => setTab('chat')}><BrandMark /><span>form<span className="brand-period">.</span></span></a>
       <div className="workspace-label">{t('YOUR PERSONAL COACH')}</div>
-      <nav aria-label={t('Main navigation')}><button className={tab === 'chat' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'chat' ? 'page' : undefined} onClick={() => setTab('chat')}><MessageSquare size={19} />{t('AI Chat')}<span className="nav-active-dot" /></button><button className={tab === 'routine' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'routine' ? 'page' : undefined} onClick={() => setTab('routine')}><Dumbbell size={19} />{t('My Routine')}<span className="nav-active-dot" /></button></nav>
+      <nav aria-label={t('Main navigation')}><button className={tab === 'chat' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'chat' ? 'page' : undefined} onClick={() => setTab('chat')}><MessageSquare size={19} />{t('AI Chat')}<span className="nav-active-dot" /></button><button className={tab === 'routine' ? 'nav-item active' : 'nav-item'} aria-current={tab === 'routine' ? 'page' : undefined} onClick={openRoutine}><Dumbbell size={19} />{t('My Routine')}<span className="nav-active-dot" /></button></nav>
       <button className="new-chat" onClick={() => { newChat(); setTab('chat') }} disabled={pending}><Plus size={17} />{t('New conversation')}</button>
       <div className="sidebar-note"><span className="note-symbol"><Activity size={22} /></span><h4>{t('Better together.')}</h4><p>{t('Your goals. Our intelligence.')}<br />{t('A stronger you.')}</p><div className="note-line"><span /><span /><span /></div></div>
       <div className="sidebar-bottom"><button className="help-button" onClick={() => setHelp(true)}><CircleHelp size={18} />{t('A little guidance')}<ArrowRight size={15} /></button><button type="button" className="profile user-profile" aria-label={t('Change user: {{name}}', { name: user.username })} aria-haspopup="dialog" onClick={() => setUserDialog(true)}><span className="avatar">{initials}</span><div><strong>{user.username}</strong><span>{t('Your fitness journey')}</span></div><span className="profile-status" /></button></div>
@@ -233,8 +292,13 @@ function MainView({ user, onSwitchUser }) {
             <p className="composer-disclaimer">{t('AI is a guide, not a substitute for professional advice. Listen to your body.')}</p>
           </div>
         </main>
-        <TrainingPanel routine={routine} onOpen={() => setTab('routine')} onPrompt={askCoach} />
-      </div> : <main className="routine-main"><RoutineView routine={routine} setRoutine={setRoutine} onAsk={askCoach} onSave={saveRoutine} saved={saved} error={error} /></main>}
+        <TrainingPanel routine={routine} onOpen={openRoutine} onPrompt={askCoach} />
+      </div> : <main className="routine-main">
+        {routineLoading ? <p role="status">{t('Loading your routine…')}</p> :
+          routineError ? <div role="alert" className="error-message"><AlertCircle size={16} aria-hidden="true" /><span>{t('Could not load routine: {{message}}', { message: routineError })}</span><button type="button" className="retry-button" onClick={loadActiveRoutine}>{t('Retry')}</button></div> :
+            workout ? <RoutineView key={`${activeRoutineId}:${JSON.stringify(activeRoutine)}`} routine={workout} setRoutine={setWorkout} onAsk={askCoach} onSave={() => { setWorkoutSaved(true); setWorkoutUpdated(false) }} onUpdate={updateWorkout} onFinishWorkout={activeRoutineId ? finishWorkout : undefined} workoutSession={workoutSession} weightUnit={user.weight_unit ?? 'kg'} saved={workoutSaved} savedMessage={workoutUpdated ? 'Routine updated and selected as your active routine.' : 'Changes saved for this session.'} /> :
+              <section className="empty-routine"><h1>{t('No saved routine yet')}</h1><p>{t('Save a routine from AI Chat to see your current training plan here.')}</p><button className="primary-button" onClick={() => askCoach(t('Create a 3-day push/pull/legs routine for an intermediate lifter, with 1 hour per session.'))}>{t('Build my routine')} <ArrowRight size={16} /></button></section>}
+      </main>}
       <footer className="app-footer"><span>{t('Made for the long run.')}</span><span>{t('FORM / YOUR PERSONAL AI COACH')}</span></footer>
     </div>
     {help && <HelpDialog onClose={() => setHelp(false)} />}

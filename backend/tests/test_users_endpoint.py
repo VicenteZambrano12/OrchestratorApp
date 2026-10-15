@@ -3,10 +3,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from api.Endpoint.users import UserRepository, get_user_repository
+from api.Endpoint.active_routine import get_routine_repository
+from api.user_deps import UserRepository, get_user_repository
 from api.redis_deps import RedisClient, SetKey, get_routine_store, get_set_key
 from app import app
 import test_chat_endpoint
+import test_routine_maker
 
 
 class UserEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -31,6 +33,24 @@ class UserEndpointTests(unittest.IsolatedAsyncioTestCase):
         ):
             app.dependency_overrides[dependency] = override
             self.addCleanup(app.dependency_overrides.pop, dependency)
+
+    async def test_active_routine_returns_saved_plan_or_null_for_user(self):
+        fixture = test_routine_maker.RoutineMakerTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        app.dependency_overrides[get_routine_repository] = lambda: fixture.maker._repository
+        self.addCleanup(app.dependency_overrides.pop, get_routine_repository)
+
+        self.assertEqual(await self.request("GET", "/users/1/routine"), (200, None))
+        saved = fixture.saved()
+        status, routine = await self.request("GET", "/users/1/routine")
+        self.assertEqual(status, 200)
+        self.assertEqual(routine, saved.routine.model_dump(mode="json"))
+        self.assertEqual(await self.request("GET", "/users/2/routine"), (200, None))
+        status, _ = await self.request("GET", "/users/999/routine")
+        self.assertEqual(status, 404)
+        status, _ = await self.request("GET", "/users/0/routine")
+        self.assertEqual(status, 422)
 
     async def test_one_persistent_default_and_registration(self):
         status, users = await self.request("GET", "/users")

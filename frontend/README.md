@@ -4,9 +4,73 @@ A responsive React + Vite mockup for OrchestratorApp, with two views:
 
 - **AI Chat:** example conversation, safe Markdown responses, expandable pipeline
   summaries, suggested prompts, and an optional live API connection.
-- **My Routine:** a three-day demo workout with editable sets, rep targets, weights
-  in kilograms, and exercise completion. Changes and saved coach recommendations
-  persist in this browser's local storage; they are not synchronized to a server.
+- **My Routine:** loads the selected user's active saved plan through
+  `GET /users/{userId}/routine` and uses the original workout view, not the chat
+  routine card. It shows the saved days, exercises, sets, rep targets, rest, notes,
+  summary, and recovery guidance. Weights start at zero because the saved plan
+  does not contain weights. Edits stay local until the user confirms an update;
+  weights and completion are saved as workout sets only after finish confirmation.
+  Loading, errors, retry, and
+  profiles without an active routine have explicit states.
+
+### Workout controls
+
+Routine details appear as compact badges, and each day card shows its completion
+count. Before starting, sets, rep targets, and weights are editable; a zero working
+weight displays `-- kg`. Invalid values show an error rather than a saved message.
+
+**Start Workout** starts the selected day's elapsed timer and expands every
+exercise into its individual sets, with actual reps and weight inputs available
+immediately. Enter results as you train; rep inputs start empty instead of guessing
+from prescribed rep targets. Targets remain visible but are read-only during the
+workout. Checking an exercise starts its prescribed rest
+countdown, with **+15s** and **Skip** controls. Other days are disabled for mouse
+and keyboard navigation until the current workout is saved. Visiting AI Chat and
+returning preserves the active day, timer, completion, and all entered set values without reloading the
+routine. Routine structure editing is disabled during a workout.
+
+**Finish workout** opens a confirmation-only dialog; it contains no set inputs.
+Only filled sets from exercises marked Done are submitted, using values already
+entered inline. Leave reps blank to skip individual sets or an entire exercise,
+even when a working weight is prefilled. Partially completed exercises can be
+marked Done. At least one filled set in an exercise marked Done is required.
+Provided reps must be positive whole numbers; provided weights must be
+non-negative. Blank weights are saved as null, not zero.
+Weights use the selected profile's kg/lbs preference. **Keep working out** closes
+the dialog without ending the session or making a request. **Yes, finish and save**
+calls `POST /users/{userId}/workouts` with the loaded routine's database ID and
+performed sets. The routine ID comes from the `X-Routine-Id` header returned by
+routine GET/PUT responses. Cross-origin deployments must expose this header.
+The server assigns the workout ID, set numbers, and UTC save date. Saving is blocked
+when no filled sets belong to exercises marked Done or provided values are invalid.
+While saving, repeat submits
+and dismissal are disabled. Errors preserve the dialog and actual values for
+retry; only success ends the timer, unlocks days, and shows a saved message.
+Starting the next workout clears that day's previous completion marks.
+
+**Edit workout** reveals drag handles, move-up/down controls (also usable on touch
+screens), swap/remove actions, and an add-exercise bar. Focus a drag handle and use
+the up/down arrow keys for keyboard reordering. Add/swap opens a dialog with
+suggestions from the current routine and support for custom exercise names.
+**Done editing** opens a confirmation dialog explaining that the edited plan will
+become a new active routine and the previous version will be kept inactive.
+**Keep editing** closes the dialog without saving or discarding edits.
+**Yes, update routine** sends the complete edited plan to
+`PUT /users/{userId}/routine`, without chat/draft query parameters. Only a
+successful save exits editing and displays a saved confirmation. While saving,
+duplicate submissions and dismissal are disabled; errors remain visible in the
+dialog so the user can retry without losing edits.
+
+Catalog exercise IDs are retained through loading, reordering, adding, and
+swapping suggested exercises. Custom exercise names may still be used locally,
+but cannot be saved until replaced by a catalog-backed suggestion. Empty days,
+duplicate exercises, and invalid targets cannot be saved. Weights and exercise
+completion are not included in the saved routine; completed sets are persisted
+separately through the finish-workout flow.
+
+Run `npm run test:routine-update` for the interactive routine/workout confirmation,
+day locking, actual-set submission, and cancel/retry
+tests and `npm run test:i18n` for routine conversion, API, and localization tests.
 
 ## Page structure
 
@@ -69,15 +133,24 @@ URL with appropriate CORS support. Do not put provider credentials in Vite varia
 Live chat calls `POST /{sessionId}/chat` with `{ query, language }`, where
 `language` is `"EN"` or `"ES"` according to the selected UI language.
 The selected profile also supplies `user_id`, which Routine Maker requires.
-Routine JSON is displayed as training days with focus, info, catalog exercise
+In chat, routine JSON is displayed as training days with focus, info, catalog exercise
 names/IDs, sets, repetitions and rest. A draft is not saved automatically:
-**Save routine to database** sends a separate confirmation turn. Saved routines
-are new inactive SQLite versions, preserving previous routines and active selection.
-Copying a saved recommendation into **My Routine** is still a browser-local action.
+**Save routine to database** sends the complete preview to
+`PUT /users/{userId}/routine`, with `session_id`, `draft_id`, and `language`
+as query parameters, without another LLM call. Chat sends
+`client_saves_routine: true`; when the backend recognizes an explicit save
+confirmation, it returns `save_requested` without writing the database, and the
+frontend uses the same PUT save flow. Ordinary previews, refusals, and requests
+for changes do not trigger PUT.
+The draft identity keeps retries from creating duplicate versions and rejects
+stale or mismatched previews. A saved confirmation is shown only after PUT
+succeeds. Failed chat saves retain the preview and a Save button for retry,
+without resending the chat message or invoking the model again. Successful saves
+immediately update the loaded active routine and reset session-only workout edits.
+Saved routines are new active SQLite versions, preserving and deactivating previous
+versions. Opening **My Routine** fetches the current active version from the backend.
 Sessions use the selected user's ID and hold process-local conversation context.
 Errors are displayed explicitly.
-The initial conversation and editable workout remain labeled demo content even
-when live mode is selected.
 
 ## Users and sessions
 
@@ -94,9 +167,9 @@ session ID. Startup and every switch await `POST /{userId}/key` before activatin
 the profile. Failures are visible and retryable; failed switches keep the current
 user. Chat includes the selected numeric `user_id` automatically.
 
-Switching profiles clears the visible conversation and isolates browser-saved
-demo routines under `form-routine-v1:{userId}`. Previous unscoped local storage is
-left untouched. Returning to a user reuses their backend session context;
+Switching profiles clears the visible conversation and session-only workout edits.
+Old browser-saved demo routines are not used as active plans. Returning to a user
+reuses their backend session context;
 **New conversation** calls `POST /{userId}/key?reset=true` to clear that user's
 conversation memory and pending routine draft, without deleting saved routines.
 
