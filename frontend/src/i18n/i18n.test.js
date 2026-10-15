@@ -15,6 +15,7 @@ let ThemeContext
 let SubsystemResponse
 let exerciseData
 let usersApi
+let routineData
 const storage = new Map()
 const html = { lang: 'en' }
 const originals = ['document', 'localStorage'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
@@ -37,6 +38,7 @@ before(async () => {
   SubsystemResponse = (await server.ssrLoadModule('/src/features/ai-chat/components/SubsystemResponse.jsx')).SubsystemResponse
   exerciseData = await server.ssrLoadModule('/src/features/ExplainerCard/exercise-data/exerciseData.jsx')
   usersApi = await server.ssrLoadModule('/src/hooks/session/users.js')
+  routineData = await server.ssrLoadModule('/src/features/RoutineMaker/routine-data/routineData.js')
 })
 
 after(async () => {
@@ -148,17 +150,13 @@ test('routine drafts render structured days but only saved versions provide a re
       if (status === 'saved') {
         assert.equal(result.content, 'Review this routine.')
         assert.deepEqual(result.savedRoutine, { id: 5, name: 'PPL' })
-        assert.match(result.routine, /Bench Press/)
       } else {
-        assert.match(result.content, /Push/)
-        assert.match(result.content, /Bench Press/)
-        assert.match(result.content, /ID 1/)
+        assert.equal(result.content, 'Review this routine.')
         assert.equal(result.savedRoutine, null)
       }
+      assert.deepEqual(result.routine, routine)
       assert.equal(result.awaitingConfirmation, status === 'awaiting_confirmation')
       assert.equal(result.draftId, status === 'awaiting_confirmation' ? 'preview-1' : null)
-      if (status === 'saved') assert.equal(typeof result.routine, 'string')
-      else assert.equal(result.routine, null)
     } finally {
       fetch.mock.restore()
     }
@@ -189,11 +187,112 @@ test('direct routine save posts the draft identity without a chat query', async 
       assert.equal(result.awaitingConfirmation, false)
       assert.equal(result.content, 'Saved.')
       assert.deepEqual(result.savedRoutine, { id: 8, name: 'Push' })
-      assert.match(result.routine, /Bench Press/)
+      assert.deepEqual(result.routine, routine)
       assert.equal(fetch.mock.callCount(), 1)
     } finally {
       fetch.mock.restore()
     }
+  }
+})
+
+test('routine JSON renders localized metadata, day tabs and exercise tables instead of a Markdown plan', async () => {
+  for (const language of ['en', 'es']) {
+    await translations.setLanguage(language)
+    for (const count of [1, 3, 7]) {
+      const routine = {
+        name: 'Balanced week', summary: 'A manageable split with recovery between sessions.',
+        recovery: 'Rest between training days.',
+        days: Array.from({ length: count }, (_, index) => ({
+          day: index + 1, day_type: `Focus ${index + 1}`, info: 'Warm up first.',
+          duration_minutes: 30 + index * 5,
+          exercises: [{
+            exercise_id: 901, name: 'Catalog Press', sets: 4, reps: '8-12', rest_seconds: 90,
+            notes: 'Use controlled movements.',
+          }],
+        })),
+      }
+      const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
+        subsystem: 'routine_maker',
+        response: { status: 'awaiting_confirmation', message: 'Review your draft.', routine, draft_id: 'preview', routine_id: null },
+      }))
+      try {
+        const result = await chat.requestChat('Create a plan', 'session', new AbortController().signal, language.toUpperCase(), 7)
+        assert.deepEqual(result.routine, routine)
+        assert.equal(result.content, 'Review your draft.')
+        const markup = renderToStaticMarkup(createElement(SubsystemResponse, { ...result, onExplainExercise: () => {} }))
+        assert.match(markup, /class="routine-maker"/)
+        assert.equal((markup.match(/role="tab"/g) || []).length, count)
+        assert.equal((markup.match(/aria-selected="true"/g) || []).length, 1)
+        assert.match(markup, /role="tabpanel"/)
+        assert.match(markup, /<table>/)
+        assert.match(markup, /<td>4<\/td><td>8-12<\/td><td>90s<\/td>/)
+        assert.ok(markup.includes(language === 'es' ? 'Días de entrenamiento' : 'Training days'))
+        assert.ok(markup.includes(language === 'es' ? 'Explicar Catalog Press' : 'Explain Catalog Press'))
+        assert.equal(markup.split(routine.summary).length - 1, 1)
+        assert.ok(!markup.includes('901') && !markup.includes('KG') && !markup.includes('DONE'))
+        assert.ok(!markup.includes('## Balanced week') && !markup.includes('[object Object]'))
+        const restored = JSON.parse(JSON.stringify({ ...chat.initialRoutine, generated: result.routine }))
+        const myRoutine = renderToStaticMarkup(createElement(RoutineView, { routine: restored }))
+        assert.match(myRoutine, /class="routine-maker"/)
+        assert.ok(myRoutine.includes(routine.summary))
+      } finally {
+        fetch.mock.restore()
+      }
+    }
+  }
+})
+
+test('routine JSON rejects malformed days, duplicate exercises and invalid targets', () => {
+  const routine = {
+    name: 'Push', recovery: 'Rest.', days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  assert.equal(routineData.isRoutinePlan(routine), true)
+  for (const update of [
+    (plan) => { plan.days = [] },
+    (plan) => { plan.days[0] = null },
+    (plan) => { plan.days[0].day = 2 },
+    (plan) => { plan.days[0].duration_minutes = -1 },
+    (plan) => { plan.days[0].exercises.push({ ...plan.days[0].exercises[0] }) },
+    (plan) => { plan.days[0].exercises[0] = null },
+    (plan) => { plan.days[0].exercises[0].sets = 0 },
+    (plan) => { plan.days[0].exercises[0].reps = '' },
+    (plan) => { plan.days[0].exercises[0].rest_seconds = 901 },
+    (plan) => { plan.summary = 'x'.repeat(601) },
+  ]) {
+    const invalid = structuredClone(routine)
+    update(invalid)
+    assert.equal(routineData.isRoutinePlan(invalid), false)
+  }
+})
+
+test('saved JSON recommendations restore while older Markdown recommendations remain readable', async () => {
+  await translations.setLanguage('en')
+  const routine = {
+    name: 'Saved plan', summary: 'A short explanation.', recovery: 'Rest between days.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Catalog Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  const storageKey = 'form-routine-v1:77'
+  try {
+    for (const generated of [routine, '## Previous recommendation\n\nUse controlled reps.']) {
+      const stored = { ...chat.initialRoutine, generated }
+      storage.set(storageKey, JSON.stringify(stored))
+      const markup = renderToStaticMarkup(createElement(ThemeContext.Provider, {
+        value: { theme: 'light', resolvedTheme: 'light', setTheme: () => {} },
+      }, createElement(MainView, { user: { id: 77, username: 'Test User' }, onSwitchUser: () => {} })))
+      assert.ok(!markup.includes('Could not restore your routine'))
+      assert.deepEqual(JSON.parse(storage.get(storageKey)), stored)
+      const view = renderToStaticMarkup(createElement(RoutineView, { routine: stored }))
+      assert.ok(view.includes(typeof generated === 'string' ? 'Previous recommendation' : 'A short explanation.'))
+      assert.ok(!view.includes('[object Object]'))
+    }
+  } finally {
+    storage.delete(storageKey)
   }
 })
 
@@ -226,7 +325,7 @@ test('button and chat saves render the same localized confirmation without repea
       assert.equal(markup.split(message).length - 1, 1)
       assert.equal((markup.match(/<button/g) || []).length, 0)
       assert.ok(!markup.includes('Bench Press') && !markup.includes('Rest between days.'))
-      assert.match(buttonSave.routine, /Bench Press/)
+      assert.deepEqual(buttonSave.routine, routine)
     } finally {
       fetch.mock.restore()
     }

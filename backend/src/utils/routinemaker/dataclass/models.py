@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationInfo, model_validator
 
 
 ROUTINE_PLAN_EXAMPLE = {
     "name": "Push day",
+    "summary": "A focused push session to build upper-body strength with controlled repetitions.",
     "days": [{
         "day": 1, "day_type": "push", "info": "Warm up before training.",
         "duration_minutes": 45.0,
@@ -107,8 +108,36 @@ class RoutinePlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
+    summary: str = Field(default="", max_length=600)
     days: list[RoutineDay] = Field(min_length=1, max_length=7)
     recovery: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_catalog_plan(self, info: ValidationInfo) -> "RoutinePlan":
+        if not info.context:
+            return self
+        if info.context.get("require_summary") and not self.summary.strip():
+            raise ValueError("Routine requires a brief summary explaining the plan.")
+        parameters = info.context["parameters"]
+        catalog = {row["id"]: row for row in info.context["catalog"]}
+        if len(self.days) != parameters.days_per_week:
+            raise ValueError("Routine must contain exactly days_per_week training days.")
+        if [day.day for day in self.days] != list(range(1, len(self.days) + 1)):
+            raise ValueError("Routine day numbers must be consecutive and unique, starting at 1.")
+        for day in self.days:
+            if parameters.hours_per_session is None or day.duration_minutes > parameters.hours_per_session * 60:
+                raise ValueError("Routine session duration exceeds the requested time.")
+            ids = [exercise.exercise_id for exercise in day.exercises]
+            if len(ids) != len(set(ids)):
+                raise ValueError("An exercise may occur only once per training day.")
+            if not set(ids).issubset(catalog):
+                raise ValueError("Routine contains unknown exercise IDs or exercises above the requested level.")
+            for exercise in day.exercises:
+                name = catalog[exercise.exercise_id]["name"]
+                if not isinstance(name, str):
+                    raise ValueError("Catalog exercise names must be strings.")
+                exercise.name = name
+        return self
 
 
 class _RoutingDecision(BaseModel):

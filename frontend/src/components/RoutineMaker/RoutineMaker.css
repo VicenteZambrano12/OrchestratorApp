@@ -1,0 +1,39 @@
+.routine-maker { width: 100%; max-width: 768px; margin: 12px 0; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--bg-surface); color: var(--text-secondary); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
+.routine-maker-header { padding: 20px; background: var(--bg-hover); border-bottom: 1px solid var(--border-subtle); }
+.routine-maker-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 20px; color: var(--accent-primary); background: var(--bg-active); font-size: 11px; font-weight: 700; }
+.routine-maker h3 { margin: 12px 0 8px; color: var(--text-primary); font-size: 18px; }
+.routine-maker p { margin: 0; font-size: 13px; line-height: 1.65; }
+.routine-maker-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 16px 0 0; }
+.routine-maker-metrics > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-surface); }
+.routine-maker-metrics svg { grid-row: span 2; color: var(--accent-primary); align-self: center; }
+.routine-maker-metrics dt { font-size: 11px; color: var(--text-muted); }
+.routine-maker-metrics dd { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.routine-maker-tabs { display: flex; gap: 10px; padding: 16px; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); background: var(--bg-hover); }
+.routine-maker-tabs button { display: grid; gap: 5px; flex: 1 0 105px; padding: 12px; min-height: 82px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-surface); color: var(--text-secondary); text-align: left; }
+.routine-maker-tabs button[aria-selected=true] { border-color: var(--accent-primary); background: var(--bg-active); box-shadow: var(--shadow-glow); }
+.routine-maker-tabs small { color: var(--accent-primary); font-size: 10px; font-weight: 700; }
+.routine-maker-tabs strong { font-size: 14px; color: var(--text-primary); }
+.routine-maker-tabs span { color: var(--text-muted); font-size: 11px; }
+.routine-maker-day > p { padding: 16px 20px; }
+.routine-maker-table-scroll { overflow-x: auto; }
+.routine-maker table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.routine-maker caption { padding: 0 20px 12px; text-align: left; font-weight: 600; color: var(--text-primary); }
+.routine-maker thead { background: var(--bg-hover); color: var(--text-muted); font-size: 10px; }
+.routine-maker th, .routine-maker td { padding: 12px; border-bottom: 1px solid var(--border-row); }
+.routine-maker th:first-child { padding-left: 20px; }
+.routine-maker td { white-space: nowrap; }
+.routine-maker tbody th { font-weight: 400; }
+.routine-maker-exercise { display: flex; align-items: center; gap: 10px; }
+.routine-maker-exercise strong { color: var(--text-primary); font-size: 13px; }
+.routine-maker-exercise p { margin-top: 4px; color: var(--text-muted); font-size: 11px; }
+.routine-maker-exercise button { flex-shrink: 0; color: var(--accent-primary); }
+.routine-maker-number { flex-shrink: 0; padding: 7px; border-radius: 7px; background: var(--bg-surface-muted); font-variant-numeric: tabular-nums; }
+.routine-maker-recovery { display: flex; gap: 10px; align-items: flex-start; padding: 16px 20px; background: var(--bg-hover); }
+.routine-maker-recovery svg { flex-shrink: 0; margin-top: 3px; color: var(--accent-primary); }
+@media (max-width: 650px) {
+  .routine-maker-header { padding: 14px; }
+  .routine-maker-metrics { grid-template-columns: 1fr; }
+  .routine-maker-metrics > div { padding: 8px; }
+  .routine-maker-number { display: none; }
+  .routine-maker th, .routine-maker td { padding: 8px; }
+}

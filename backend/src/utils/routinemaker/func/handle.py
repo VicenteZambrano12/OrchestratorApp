@@ -156,10 +156,15 @@ def handle(
                 **state.change.model_dump(), **decision.change.model_dump(exclude_unset=True),
             })
             state.requests.append(query)
+            if not choices:
+                return result("needs_routine", localized(
+                    "You have no saved routines to modify. Create a routine first.",
+                    "No tienes rutinas guardadas para modificar. Crea una rutina primero.",
+                ))
             return result("needs_routine", localized(
-                "Which saved routine should I modify? Provide its routine ID. Available: ",
-                "Que rutina guardada quieres modificar? Indica su ID. Disponibles: ",
-            ) + str(choices))
+                "Which saved routine should I modify? Choose by name, or say the most recent or an older version. Available, newest first:\n",
+                "Que rutina guardada quieres modificar? Elige por nombre o indica la version mas reciente o una anterior. Disponibles, de mas reciente a mas antigua:\n",
+            ) + "\n".join(f"- {choice['name']}" for choice in choices))
         if state.workflow != "update_saved" or state.source_routine_id != selected:
             plan, known = repository.load(user_id, selected)
             loaded_parameters = known
@@ -226,16 +231,19 @@ def handle(
             or (change.action == "remove" and len(day.exercises) == 1)
         ):
             return result("needs_changes", localized(
-                "Select a valid day and catalog exercise ID. Remove, replace or adjust an exercise in that day; a training day must keep at least one exercise.",
-                "Elige un dia y un ID del catalogo validos. Quita, sustituye o ajusta un ejercicio de ese dia; cada dia debe mantener al menos un ejercicio.",
+                "Select a training day and an exercise by name. Remove, replace or adjust an exercise in that day; a training day must keep at least one exercise.",
+                "Elige un dia de entrenamiento y un ejercicio por su nombre. Quita, sustituye o ajusta un ejercicio de ese dia; cada dia debe mantener al menos un ejercicio.",
             ))
 
     stage = "routine_maker" if state.workflow == "create" else "routine_updater"
     for attempt in range(3):
         response = generate_response(stage, payload)
         try:
-            generated = RoutinePlan.model_validate_json(response)
-            repository.validate_plan(generated, state.parameters)
+            generated = RoutinePlan.model_validate_json(
+                response, context={
+                    "parameters": state.parameters, "catalog": catalog, "require_summary": True,
+                },
+            )
             if state.workflow != "create" and state.routine is not None and state.change.action is not None:
                 _validate_change(state.routine, generated, state.change)
             break

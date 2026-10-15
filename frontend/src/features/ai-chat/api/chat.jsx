@@ -1,5 +1,6 @@
 import i18n from 'i18next'
 import { isExerciseList } from '../../ExplainerCard/exercise-data/exerciseData'
+import { isRoutinePlan } from '../../RoutineMaker/routine-data/routineData'
 
 export const subsystemNames = {
   routine_maker: 'Routine maker',
@@ -57,23 +58,6 @@ export async function demoReply(query, signal) {
     return { subsystem: 'routine_maker', content: 'Here’s an **illustrative starting plan**, not a personalized assessment. The demo uses the same 3-day split; live mode can tailor it to your requirements.\n\n' + demoRoutine + '\n\nSave this recommendation to your routine, then adjust the exercise targets to suit your level.', routine: demoRoutine }
   }
   return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain. 🌱\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
-}
-
-export function formatRoutine(plan, t) {
-  if (!plan || typeof plan.name !== 'string' || typeof plan.recovery !== 'string' ||
-    !Array.isArray(plan.days) || !plan.days.length || !plan.days.every((day) =>
-      Number.isInteger(day.day) && typeof day.day_type === 'string' && typeof day.info === 'string' &&
-      Number.isFinite(day.duration_minutes) && Array.isArray(day.exercises) && day.exercises.length &&
-      day.exercises.every((item) => Number.isInteger(item.exercise_id) && typeof item.name === 'string' &&
-        Number.isInteger(item.sets) && typeof item.reps === 'string' && Number.isInteger(item.rest_seconds) &&
-        typeof item.notes === 'string'))) {
-    throw new Error(t('The chat API returned an invalid response.'))
-  }
-  return [`## ${plan.name}`, ...plan.days.map((day) =>
-    `### ${t('DAY')} ${day.day} - ${day.day_type}\n\n${day.info}\n\n${day.duration_minutes} min\n\n` +
-    day.exercises.map((item) =>
-      `- **${item.name}** (ID ${item.exercise_id}): ${item.sets} x ${item.reps}; ${t('Rest')}: ${item.rest_seconds}s. ${item.notes}`
-    ).join('\n')), plan.recovery].join('\n\n')
 }
 
 export async function requestChat(query, sessionId, signal, language, userId) {
@@ -144,7 +128,10 @@ async function requestChatAction(path, payload, signal, language, userId) {
       !['awaiting_confirmation', 'saved', 'needs_parameters', 'needs_changes', 'needs_routine', 'no_match'].includes(result.status)) {
       throw new Error(t('The chat API returned an invalid response.'))
     }
-    const routine = result.routine === null ? null : formatRoutine(result.routine, t)
+    const routine = result.routine
+    if (routine !== null && !isRoutinePlan(routine)) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
     if (result.status === 'awaiting_confirmation' &&
       (!routine || typeof result.draft_id !== 'string' || !result.draft_id.trim())) {
       throw new Error(t('The chat API returned an invalid response.'))
@@ -155,8 +142,8 @@ async function requestChatAction(path, payload, signal, language, userId) {
     }
     return {
       subsystem: data.subsystem,
-      content: result.status === 'saved' ? result.message : [result.message, routine].filter(Boolean).join('\n\n'),
-      routine: result.status === 'saved' ? routine : null,
+      content: result.message,
+      routine,
       savedRoutine: result.status === 'saved' ? { id: result.routine_id, name: result.routine.name } : null,
       awaitingConfirmation: result.status === 'awaiting_confirmation',
       routineId: result.routine_id,

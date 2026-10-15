@@ -11,7 +11,7 @@
 		"user_query": "string - message sent by the user; empty for a direct Save button action",
 		"system_response": "string - response returned by the system; routine turns contain only the message, not a serialized plan",
 		"subsystem_chosen": "string - id of the subsystem selected by the orchestrator (see config/systems.json)",
-		"routine": "object or null - only on routine_maker turns: name, days (list of day/day_type/info/duration_minutes/exercises), recovery. Exercises contain exercise_id, name, sets, reps, rest_seconds and notes. Null before a plan exists. Never a JSON-encoded string."
+		"routine": "object or null - only on routine_maker turns: name, summary (brief explanation, up to 600 characters), days (list of day/day_type/info/duration_minutes/exercises), recovery. Exercises contain exercise_id, name, sets, reps, rest_seconds and notes. Null before a plan exists. Never a JSON-encoded string."
 	},
 	"example": {
 		"key": "session_8f3a2c1e",

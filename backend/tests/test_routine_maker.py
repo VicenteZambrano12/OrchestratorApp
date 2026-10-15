@@ -31,6 +31,7 @@ def decision(intent="create", parameters=None, **kwargs):
 def plan():
     return {
         "name": "Three-day PPL",
+        "summary": "Three focused sessions balance pushing, pulling and leg training with recovery days.",
         "days": [
             {
                 "day": number, "day_type": kind, "info": "Warm up for five minutes.",
@@ -262,8 +263,39 @@ class RoutineMakerTests(unittest.TestCase):
             db.execute("UPDATE dim_routines SET is_active = 0")
         result = self.turn(decision("update_saved"), session_id="new")
         self.assertEqual(result.status, "needs_routine")
-        self.assertIn("ID", result.message)
+        self.assertIn("Three-day PPL", result.message)
+        self.assertIn("newest first", result.message)
+        self.assertNotRegex(result.message, r"(?i)\bid\b|routine_id|is_active|\d")
         self.assertEqual(self.state("new").workflow, "update_saved")
+
+    def test_routine_selection_messages_offer_names_without_ids_in_both_languages(self):
+        first = self.saved()
+        second = self.saved()
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE dim_routines SET name = 'Earlier split', is_active = 0 WHERE id = ?", (first.routine_id,))
+            db.execute("UPDATE dim_routines SET name = 'Latest split', is_active = 0 WHERE id = ?", (second.routine_id,))
+        for language in ("EN", "ES"):
+            result = self.turn(
+                decision("update_saved"), session_id=f"selection-{language}", language=language,
+            )
+            self.assertEqual(result.status, "needs_routine")
+            self.assertIn("- Latest split\n- Earlier split", result.message)
+            self.assertNotRegex(result.message, r"(?i)\bid\b|routine_id|is_active|\d")
+
+    def test_no_saved_routines_asks_to_create_one_without_ids(self):
+        for language in ("EN", "ES"):
+            result = self.turn(
+                decision("update_saved"), session_id=f"empty-{language}", language=language,
+            )
+            self.assertEqual(result.status, "needs_routine")
+            self.assertNotRegex(result.message, r"(?i)\bid\b|routine_id|is_active")
+            self.assertIn("Create" if language == "EN" else "Crea", result.message)
+
+    def test_routine_prompts_keep_database_ids_out_of_user_facing_text(self):
+        for stage in ("routing", "parameters", "routine_maker", "routine_updater"):
+            with self.subTest(stage=stage):
+                self.assertIn("Database IDs are internal only.", self.maker._prompts[stage])
+                self.assertIn("Never show or ask for IDs", self.maker._prompts[stage])
 
     def test_edit_details_survive_saved_routine_selection(self):
         saved = self.saved()
@@ -474,6 +506,60 @@ class RoutineMakerTests(unittest.TestCase):
         self.assertIsNone(self.state())
         self.assertEqual(self.rows(), [])
 
+    def test_json_catalog_and_summary_errors_use_exactly_three_generation_attempts(self):
+        unknown = plan()
+        unknown["days"][0]["exercises"][0]["exercise_id"] = 999
+        self.client.generate.reset_mock()
+        result = self.turn(
+            decision(parameters=COMPLETE), '{"name":',
+            json.dumps(unknown), json.dumps(plan()),
+        )
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertEqual(result.routine.summary, plan()["summary"])
+        calls = self.client.generate.call_args_list
+        self.assertEqual(len(calls), 4)  # One routing call, three generation calls.
+        self.assertIn("json_invalid", json.loads(calls[2].args[0])["validation_error"])
+        self.assertIn("unknown exercise", json.loads(calls[3].args[0])["validation_error"])
+        self.assertEqual(self.rows(), [])
+
+    def test_three_unknown_catalog_outputs_raise_pydantic_error_without_state_or_database_write(self):
+        invalid = plan()
+        invalid["days"][0]["exercises"][0]["exercise_id"] = 999
+        self.client.generate.reset_mock()
+        with self.assertRaisesRegex(ValidationError, "unknown exercise"):
+            self.turn(
+                decision(parameters=COMPLETE),
+                *[json.dumps(invalid)] * 3,
+            )
+        self.assertEqual(self.client.generate.call_count, 4)
+        self.assertIsNone(self.state())
+        self.assertEqual(self.rows(), [])
+
+    def test_generation_requires_brief_summary_and_preserves_previous_preview_after_failure(self):
+        before = self.draft()
+        for summary in ("", " " * 4, "x" * 601):
+            invalid = plan()
+            invalid["summary"] = summary
+            with self.subTest(summary=summary), self.assertRaises(ValidationError):
+                self.turn(
+                    decision("update_draft", {"hours_per_session": 2.0}),
+                    *[json.dumps(invalid)] * 3,
+                )
+            self.assertEqual(self.state().routine, before.routine)
+            self.assertEqual(self.state().draft_id, before.draft_id)
+        self.assertEqual(self.rows(), [])
+
+    def test_saved_legacy_plan_without_summary_still_loads_and_validates(self):
+        saved = self.saved()
+        with sqlite3.connect(self.database) as db:
+            db.execute(
+                "UPDATE dim_routines SET description = json_remove(description, '$.routine.summary') WHERE id = ?",
+                (saved.routine_id,),
+            )
+        stored, parameters = self.maker._repository.load(1, saved.routine_id)
+        self.assertEqual(stored.summary, "")
+        self.maker._repository.validate_plan(stored, parameters)
+
     def test_update_rejects_unrelated_changes_and_retries(self):
         self.draft()
         changed = plan()
@@ -491,7 +577,19 @@ class RoutineMakerTests(unittest.TestCase):
         self.client.generate.reset_mock()
         result = self.turn(decision("update_draft", change={"action": "remove", "day": 2, "exercise_id": 1}))
         self.assertEqual(result.status, "needs_changes")
+        self.assertIn("by name", result.message)
+        self.assertNotRegex(result.message, r"(?i)\bid\b|exercise_id")
         self.client.generate.assert_called_once()
+
+    def test_invalid_exercise_selection_asks_by_name_in_spanish(self):
+        self.draft()
+        result = self.turn(
+            decision("update_draft", change={"action": "remove", "day": 2, "exercise_id": 1}),
+            language="ES",
+        )
+        self.assertEqual(result.status, "needs_changes")
+        self.assertIn("por su nombre", result.message)
+        self.assertNotRegex(result.message, r"(?i)\bid\b|exercise_id")
 
     def test_provider_errors_are_not_retried_or_hidden(self):
         self.client.generate.side_effect = ValueError("Provider configuration failed")

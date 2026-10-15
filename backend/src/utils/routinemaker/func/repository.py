@@ -62,25 +62,9 @@ class RoutineRepository:
         return RoutinePlan.model_validate(stored["routine"]), RoutineParameters.model_validate(stored["parameters"])
 
     def validate_plan(self, plan: RoutinePlan, parameters: RoutineParameters) -> None:
-        if len(plan.days) != parameters.days_per_week:
-            raise ValueError("Routine must contain exactly days_per_week training days.")
-        if [day.day for day in plan.days] != list(range(1, len(plan.days) + 1)):
-            raise ValueError("Routine day numbers must be consecutive and unique, starting at 1.")
-        catalog = {row["id"]: row for row in self.catalog(parameters)}
-        allowed = set(catalog)
-        for day in plan.days:
-            if parameters.hours_per_session is None or day.duration_minutes > parameters.hours_per_session * 60:
-                raise ValueError("Routine session duration exceeds the requested time.")
-            ids = [exercise.exercise_id for exercise in day.exercises]
-            if len(ids) != len(set(ids)):
-                raise ValueError("An exercise may occur only once per training day.")
-            if not set(ids).issubset(allowed):
-                raise ValueError("Routine contains unknown exercise IDs or exercises above the requested level.")
-            for exercise in day.exercises:
-                name = catalog[exercise.exercise_id]["name"]
-                if not isinstance(name, str):
-                    raise ValueError("Catalog exercise names must be strings.")
-                exercise.name = name
+        RoutinePlan.model_validate(
+            plan, context={"parameters": parameters, "catalog": self.catalog(parameters)},
+        )
 
     def save(
         self, user_id: int, plan: RoutinePlan, parameters: RoutineParameters,

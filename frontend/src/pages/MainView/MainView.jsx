@@ -17,6 +17,7 @@ import { SubsystemResponse } from '../../features/ai-chat/components/SubsystemRe
 import { initialMessages, initialRoutine, requestChat, requestRoutineSave } from '../../features/ai-chat/api/chat'
 import UserDialog from '../../components/UserDialog/UserDialog'
 import { setSessionKey } from '../../hooks/session/users'
+import { isRoutinePlan } from '../../features/RoutineMaker/routine-data/routineData'
 
 function loadRoutine(routineStorageKey) {
   try {
@@ -30,7 +31,7 @@ function loadRoutine(routineStorageKey) {
           typeof exercise.reps === 'string' && exercise.reps.trim() &&
           Number.isFinite(exercise.weight) && exercise.weight >= 0 &&
           typeof exercise.completed === 'boolean')) ||
-      typeof routine.generated !== 'string') {
+      (typeof routine.generated !== 'string' && !isRoutinePlan(routine.generated))) {
       throw new Error('The saved routine is not valid.')
     }
     return { routine, error: '' }
@@ -219,7 +220,7 @@ function MainView({ user, onSwitchUser }) {
               <div className="message-avatar">{message.role === 'assistant' ? <BrandMark small /> : <span className="avatar">{initials}</span>}</div>
               <div className="message-body"><div className="message-heading"><strong>{t(message.role === 'assistant' ? 'Form coach' : 'You')}</strong><span>{message.role === 'assistant' ? <><span className="ai-label">{t('AI')}</span>{message.demo && t('Example response')}</> : t('Just now')}</span></div>
                 {message.role === 'assistant' && !message.savedRoutine && <Pipeline subsystem={message.subsystem} demo={message.demo} />}
-                <SubsystemResponse subsystem={message.subsystem} content={message.content} savedRoutine={message.savedRoutine} />
+                <SubsystemResponse subsystem={message.subsystem} content={message.content} savedRoutine={message.savedRoutine} routine={message.routine} onExplainExercise={(name) => askCoach(t('Explain how to do {{exercise}}.', { exercise: name }))} />
                 {message.awaitingConfirmation && <button className="primary-button" disabled={pending || message !== messages.at(-1)} onClick={() => confirmRoutine(message)}>{t('Save routine to database')}</button>}
               </div>
             </article>)}

@@ -467,13 +467,21 @@ without retrying them as validation errors. Requirements are `routine_type`
 24), and `level` (`beginner`, `intermediate`, or `advanced`). The routing prompt
 normalizes English/Spanish terms, accepts PPPL as a PPL typo, and converts
 session minutes to hours. Missing or ambiguous requirements are not guessed.
-The result's `routine` is JSON with `name`, `days`, and `recovery`. Each day has
+The result's `routine` is JSON with `name`, `summary`, `days`, and `recovery`.
+Newly generated plans require a short localized `summary` (1-3 sentences, at
+most 600 characters) explaining the split and rep targets without repeating the
+exercise list. Older saved plans without a summary remain readable. Each day has
 `day`, `day_type`, `info`, `duration_minutes`, and `exercises`. Each exercise has
 `exercise_id`, its database `name`, `sets`, `reps`, `rest_seconds`, and `notes`.
 Exercise IDs must exist in `dim_exercises` at or below the requested experience
 level; exercise names are copied from SQLite, not trusted from model output.
 Validation enforces the exact training-day count, consecutive day numbers,
 no duplicate exercises within a day, and the per-session time limit.
+These checks run in Pydantic with database catalog context, alongside JSON/schema
+validation. Malformed JSON, invalid targets, missing summaries, and non-catalog
+exercise IDs receive validation feedback for up to **three total generation
+attempts**. Exhaustion raises the validation error without replacing the cached
+preview or writing a routine. Saving revalidates against the current database.
 
 ```python
 from systems.routinemaker.RoutineMaker import RoutineMaker
@@ -521,7 +529,10 @@ Explicitly starting a fresh routine discards the previous draft's requirements.
 For exercise edits, collect `action` (`add`, `remove`, `replace`, `adjust`),
 training `day`, and `exercise_id`; replacement needs `replacement_exercise_id`,
 and adjustment needs `details`. The model receives catalog names/IDs to resolve
-named exercises. Missing details produce `needs_changes`; missing/ambiguous
+named exercises, but IDs remain internal: user-facing messages and generated
+descriptions use names, never ask for or display database IDs. Ambiguous saved
+routine selection lists names newest first and accepts names or relative recency
+to distinguish versions. Missing details produce `needs_changes`; missing/ambiguous
 saved-routine selection produces `needs_routine` only when there is no unique
 current routine (or sole saved routine) to select automatically. Without an
 explicit selection, update requests load the user's current `is_active = 1`
@@ -552,6 +563,13 @@ a separate database-save confirmation button. Successful saves automatically
 store the recommendation in the selected user's local My Routine view, without
 an additional save action or leaving the chat. The editable workout log is preserved.
 Local-storage errors are surfaced without undoing the successful database save.
+The shared `RoutineMaker` HTML card renders the JSON directly in chat previews
+and My Routine: a short explanation, split/day/duration metadata, accessible day
+tabs, exercise tables (sets, reps, rest, notes), and recovery advice. Exercise
+help buttons prepare a coach explanation request. No weights or routine IDs
+are displayed, and a preview does not pretend to be a completed workout.
+The frontend stores the saved recommendation as JSON rather than Markdown;
+previously stored Markdown recommendations remain readable.
 
 The button calls `POST /{id}/routine/save` directly with
 `{"user_id": 1, "draft_id": "<preview draft_id>", "language": "EN"}`.
