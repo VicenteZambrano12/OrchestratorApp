@@ -21,7 +21,7 @@ def handle_with_subsystem(
     parameters: RoutineParameters | Mapping[str, object] | None = None,
     routine: RoutinePlan | None = None,
     history: str | None = None,
-    memory: list[dict[str, str]] | None = None,
+    memory: list[dict[str, object]] | None = None,
     session_id: str | None = None,
     user_id: int | None = None,
 ) -> PipelineResult:

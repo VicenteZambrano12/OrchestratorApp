@@ -196,7 +196,7 @@ class OpenAPITests(unittest.TestCase):
         self.assertTrue(RoutineMakerResult.__dataclass_params__.frozen)
         self.assertEqual(
             [field.name for field in fields(RoutineMakerResult)],
-            ["status", "parameters", "message", "routine", "routine_id"],
+            ["status", "parameters", "message", "routine", "routine_id", "draft_id"],
         )
         result = RoutineMakerResult(
             "needs_parameters", parameters, "What is your training level?", None

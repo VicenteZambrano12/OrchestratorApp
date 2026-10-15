@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from api.DataClasses.pipeline.ChatRequest import ChatRequest
 from api.DataClasses.pipeline.ChatResponse import ChatResponse
+from api.DataClasses.pipeline.SaveRoutineRequest import SaveRoutineRequest
 from api.documentation import INTERNAL_SERVER_ERROR_RESPONSE, VALIDATION_ERROR_RESPONSE
-from api.redis_deps import get_n_turns, get_set_turn
+from api.redis_deps import SetTurn, get_n_turns, get_routine_store, get_set_turn
 from systems.pipeline.Pipeline import Pipeline
 from utils.routinemaker.func.repository import RoutineInputError
+from utils.routinemaker.func.repository import RoutineRepository
+from utils.routinemaker.func.handle import RoutineStore, save_draft
 
 
 router = APIRouter()
@@ -15,6 +18,56 @@ router = APIRouter()
 
 def get_pipeline() -> Pipeline:
     return Pipeline(turn_setter=get_set_turn(), turn_getter=get_n_turns())
+
+
+def get_routine_repository() -> RoutineRepository:
+    return RoutineRepository()
+
+
+@router.post(
+    "/{id}/routine/save",
+    tags=["Chat"],
+    summary="Save a routine preview directly",
+    response_model=ChatResponse,
+    responses={
+        422: VALIDATION_ERROR_RESPONSE,
+        500: INTERNAL_SERVER_ERROR_RESPONSE,
+    },
+)
+def save_routine(
+    id: str,
+    request: SaveRoutineRequest,
+    repository: Annotated[RoutineRepository, Depends(get_routine_repository)],
+    state_store: Annotated[RoutineStore, Depends(get_routine_store)],
+    turn_setter: Annotated[SetTurn, Depends(get_set_turn)],
+) -> ChatResponse:
+    """Save the specified cached draft as the user's new current routine.
+
+    **Side effects:** atomically inserts an active version and deactivates the
+    user's previous routines, preserving their contents. No routing or LLM calls
+    occur. Retrying the same draft does not create another version or reactivate
+    an older routine. Stale draft identifiers and invalid users return 422.
+    Successful saves append a memory turn with an empty user_query (button
+    action), a text confirmation, and the structured routine in its own field.
+
+    **Permissions:** caller-supplied session/user scope, not authentication.
+    Only the server-cached preview is saved; clients cannot submit plan contents.
+    """
+    try:
+        result = save_draft(
+            repository=repository, state_store=state_store, session_id=id,
+            user_id=request.user_id, draft_id=request.draft_id, language=request.language,
+        )
+    except RoutineInputError as error:
+        raise HTTPException(status_code=422, detail=[{
+            "loc": ["body"], "msg": str(error), "type": "value_error",
+        }]) from error
+    if result.status == "saved":
+        turn_setter.set(
+            id, "", result.message, "routine_maker",
+            routine=result.routine.model_dump(mode="json") if result.routine else None,
+        )
+    return ChatResponse(subsystem="routine_maker", response=result)
 
 
 @router.post(
@@ -67,8 +120,9 @@ def chat(
     Routine requests require `user_id` identifying an existing database user.
     Draft JSON and collected parameters are cached per session and user. New
     routines and edits return `awaiting_confirmation` without database writes.
-    An explicit confirmation on a later turn saves a new inactive version;
-    the original routine and active selection remain unchanged.
+    An explicit confirmation on a later turn saves a new active version;
+    previous versions are preserved but deactivated. The direct routine/save
+    endpoint confirms a preview without routing or LLM calls.
 
     **Side effects:** routing and selected systems may call Gemini and consume
     provider quota. Successful turns are stored for follow-up explanations.

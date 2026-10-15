@@ -8,7 +8,7 @@ def handle(
     query: str,
     *,
     language: str = "EN",
-    memory: list[dict[str, str]] | None = None,
+    memory: list[dict[str, object]] | None = None,
     catalog: ExerciseCatalog | None = None,
 ) -> str | list[ExerciseExplanation]:
     """Validate a request, collect names, or explain the supplied exercises."""

@@ -1,8 +1,8 @@
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from api.Endpoint.chat import get_pipeline
+from api.Endpoint.chat import get_pipeline, get_routine_repository
 from app import app
 from systems.orch.Orchestrator import Orchestrator
 from systems.pipeline.Pipeline import Pipeline
@@ -12,7 +12,7 @@ from utils.exercise_explainer.dataclass.models import ExerciseExplanation
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from utils.general.GeminiApiCall import GeminiClient
 from systems.routinemaker.RoutineMaker import RoutineMaker
-from api.redis_deps import GetNTurns, SetTurn
+from api.redis_deps import GetNTurns, SetTurn, get_routine_store, get_set_turn
 import test_routine_maker as routine_fixtures
 
 
@@ -119,8 +119,63 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "message": "What is your level?",
                 "routine": None,
                 "routine_id": None,
+                "draft_id": None,
             },
         })
+
+    def routine_fixture(self):
+        fixture = routine_fixtures.RoutineMakerTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        app.dependency_overrides[get_routine_repository] = lambda: fixture.maker._repository
+        app.dependency_overrides[get_routine_store] = lambda: fixture.store
+        app.dependency_overrides[get_set_turn] = lambda: SetTurn(fixture.store)
+        for dependency in (get_routine_repository, get_routine_store, get_set_turn):
+            self.addCleanup(app.dependency_overrides.pop, dependency)
+        return fixture
+
+    async def test_direct_save_uses_cached_preview_without_pipeline_or_gemini(self):
+        fixture = self.routine_fixture()
+        preview = fixture.draft()
+        fixture.client.generate.reset_mock()
+        payload = {"user_id": 1, "draft_id": preview.draft_id, "language": "ES"}
+        with patch("systems.routinemaker.RoutineMaker.GeminiClient", side_effect=AssertionError("No LLM")):
+            for _ in range(2):
+                status, body = await self.request("POST", "/session/routine/save", payload)
+                self.assertEqual(status, 200)
+                self.assertEqual(body["subsystem"], "routine_maker")
+                self.assertEqual(body["response"]["status"], "saved")
+                self.assertEqual(body["response"]["routine"], preview.routine.model_dump())
+                self.assertIn("actual", body["response"]["message"])
+        self.assertEqual(len(fixture.rows()), 1)
+        self.assertEqual(fixture.rows()[0][4], 1)
+        turn = fixture.store.get_last_turn("session")
+        self.assertEqual(turn["routine"], preview.routine.model_dump())
+        self.assertEqual(turn["system_response"], body["response"]["message"])
+        self.assertEqual(turn["user_query"], "")
+        self.assertNotIn('"days"', turn["system_response"])
+        fixture.client.generate.assert_not_called()
+        self.pipeline.handle_with_subsystem.assert_not_called()
+
+    async def test_direct_save_rejects_other_scopes_and_stale_or_invalid_input(self):
+        fixture = self.routine_fixture()
+        preview = fixture.draft()
+        payload = {"user_id": 1, "draft_id": preview.draft_id, "language": "EN"}
+        for path, overrides in (
+            ("/other/routine/save", {}),
+            ("/session/routine/save", {"user_id": 2}),
+            ("/session/routine/save", {"user_id": 999}),
+            ("/session/routine/save", {"user_id": True}),
+            ("/session/routine/save", {"draft_id": "old"}),
+            ("/session/routine/save", {"draft_id": " "}),
+            ("/session/routine/save", {"language": "es"}),
+            ("/session/routine/save", {"routine_id": 1}),
+        ):
+            with self.subTest(path=path, overrides=overrides):
+                status, _ = await self.request("POST", path, {**payload, **overrides})
+                self.assertEqual(status, 422)
+        self.assertEqual(fixture.rows(), [])
+        self.assertEqual(fixture.store.turn_count("session"), 0)
 
     async def test_returns_original_exercise_fields_and_generated_explanation(self):
         exercise = ExerciseExplanation(
@@ -181,6 +236,14 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixture.store.turn_count(self.session_id), 3)
         self.assertEqual(orchestrator.route.call_count, 3)
         self.assertEqual(len(orchestrator.route.call_args.args[0]["memory"]), 2)
+        turns = fixture.store.get_session(self.session_id)
+        self.assertIsNone(turns[1]["routine"])
+        for turn_id in (2, 3):
+            self.assertEqual(turns[turn_id]["routine"], body["response"]["routine"])
+            self.assertNotIn('"routine"', turns[turn_id]["system_response"])
+        self.assertEqual(turns[3]["system_response"], body["response"]["message"])
+        memory = orchestrator.route.call_args.args[0]["memory"]
+        self.assertEqual(memory[-1]["routine"], turns[2]["routine"])
 
     async def test_routine_requests_require_user_identity(self):
         orchestrator = Mock(spec=Orchestrator)
@@ -257,6 +320,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                             "message": "What is your level?",
                             "routine": None,
                             "routine_id": None,
+                            "draft_id": None,
                         }
                     else:
                         system.handle.return_value = "Exercise explanation"

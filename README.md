@@ -87,9 +87,10 @@ The required `subsystem` field is the orchestrator's selected ID:
 `routine_maker`, `exercise_explainer`, `past_routines_analyzer`, or `no_system`
 for localized no-match messages. Routing executes once per request.
 Routine Maker results remain structured under `response`, with
-`status`, `parameters`, `message`, structured `routine`, and `routine_id` fields.
+`status`, `parameters`, `message`, structured `routine`, `routine_id`, and `draft_id` fields.
 Drafts are cached per session/user and require an explicit later confirmation
-before a new inactive routine version is saved. Exercise explanations
+before a new active routine version is saved. The preview's `draft_id` can be
+confirmed through `POST /{id}/routine/save` without any LLM calls. Exercise explanations
 return an exercise list under `response`, or a text clarification request.
 Invalid request bodies
 return HTTP 422. Configuration, provider, and processing failures propagate
@@ -458,7 +459,8 @@ from `systems.routinemaker.RoutineMaker` for compatibility.
 
 These are conditional stages, not four requests on every turn. A normal turn
 makes one routing call followed by at most one collection/creation/update call;
-confirmation and unrelated input only need routing. Invalid generated JSON or
+text confirmation and unrelated input only need routing; the direct Save button
+bypasses both the pipeline and Gemini entirely. Invalid generated JSON or
 plans get up to three total generation attempts; provider failures propagate
 without retrying them as validation errors. Requirements are `routine_type`
 (`weider` or `ppl`), `days_per_week` (1-7), `hours_per_session` (positive, at most
@@ -501,6 +503,17 @@ Use the same session/user on follow-ups. State is cached in the session hash und
 `routine_state:<user_id>`, separate from numeric conversation-turn fields.
 The existing Redis client uses **fakeredis**: drafts are process-local and lost
 on restart; this is not a durable external Redis deployment.
+Routine Maker turns also keep the plan in a separate `routine` field in session
+memory. It is a JSON object, not a string embedded in `system_response`:
+`routine.days[]` contains each day's `day`, `day_type`, `info`,
+`duration_minutes`, and `exercises[]`; exercises contain catalog `exercise_id`,
+`name`, `sets`, `reps`, `rest_seconds`, and `notes`. No weight is generated.
+`routine` is null when no plan exists yet; `system_response` contains only the
+follow-up or confirmation message. Each turn stores its own snapshot, so later
+edits do not mutate earlier routines. Routing preserves this structured memory.
+Non-routine turns retain their existing storage format. Direct Save button
+requests also append a routine turn, using an empty `user_query` for the button
+action instead of inventing a user chat message.
 Parameter updates merge with known values. Invalid/ambiguous replacements clear
 the previous value and trigger a question rather than silently reusing it.
 Explicitly starting a fresh routine discards the previous draft's requirements.
@@ -509,14 +522,18 @@ For exercise edits, collect `action` (`add`, `remove`, `replace`, `adjust`),
 training `day`, and `exercise_id`; replacement needs `replacement_exercise_id`,
 and adjustment needs `details`. The model receives catalog names/IDs to resolve
 named exercises. Missing details produce `needs_changes`; missing/ambiguous
-saved-routine selection produces `needs_routine`. Parameter-only schedule
+saved-routine selection produces `needs_routine` only when there is no unique
+current routine (or sole saved routine) to select automatically. Without an
+explicit selection, update requests load the user's current `is_active = 1`
+routine from SQLite. Parameter-only schedule
 changes are also supported. Exercise edits preserve unaffected exercises and
 their prescriptions. Beginning any edit revokes the previous preview's confirmation.
 
 Statuses are `needs_parameters`, `needs_changes`, `needs_routine`,
 `awaiting_confirmation`, `saved`, and `no_match`. Only `saved` writes a routine.
-Confirmation saves the preview as a **new inactive version** in `dim_routines`;
-the original and active selection are never overwritten. The description stores
+Confirmation saves the preview as a **new active version** in `dim_routines`;
+the user's previous versions are deactivated in the same transaction, preserving
+their contents. Other users' active routines are unaffected. The description stores
 the plan JSON, parameters, source routine ID, and an idempotent draft ID.
 `routine_id` identifies the newly saved version. Retrying a committed draft does
 not create duplicates. Planned sets are not inserted into completed workout logs.
@@ -531,8 +548,23 @@ configuration errors, and API failures propagate without silent fallbacks.
 `POST /{id}/chat` supplies the session ID and accepts numeric `user_id`.
 Missing/unknown users and selecting a routine owned by another user return 422.
 The frontend passes the selected profile ID, renders day/exercise JSON, and offers
-a separate database-save confirmation button. Copying an already saved
-recommendation into the browser's demo workout remains a distinct local action.
+a separate database-save confirmation button. Successful saves automatically
+store the recommendation in the selected user's local My Routine view, without
+an additional save action or leaving the chat. The editable workout log is preserved.
+Local-storage errors are surfaced without undoing the successful database save.
+
+The button calls `POST /{id}/routine/save` directly with
+`{"user_id": 1, "draft_id": "<preview draft_id>", "language": "EN"}`.
+This endpoint needs no Gemini configuration, loads only the session/user's cached
+draft, and returns the same `{"subsystem": "routine_maker", "response": ...}`
+envelope. New and modified previews expose a `draft_id` and show the button;
+beginning an edit revokes the previous confirmation. Stale or foreign-scope
+draft IDs return 422. Repeated saves of the same confirmed draft return its
+existing routine ID without creating duplicates or reactivating old versions.
+Save errors remain visible and can be retried using the same button.
+Both direct saves and chat-requested saves render a shared saved-routine
+confirmation card with the routine name, without displaying its database ID or repeating the full
+plan. No additional recommendation-save button is shown.
 
 Run the mocked workflow tests without API calls:
 

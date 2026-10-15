@@ -40,7 +40,7 @@ def create_chat_selector(
 		query: str,
 		subsystems: list[dict[str, Any]],
 		language: str,
-		memory: list[dict[str, str]] | None = None,
+		memory: list[dict[str, object]] | None = None,
 	) -> str:
 		data: dict[str, Any] = {
 			"query": query, "subsystems": subsystems, "language": language

@@ -34,7 +34,7 @@ class ExerciseExplainer:
         query: str,
         *,
         language: str = "EN",
-        memory: list[dict[str, str]] | None = None,
+        memory: list[dict[str, object]] | None = None,
     ) -> str | list[ExerciseExplanation]:
         """Explain one exercise or a list; ask for names if none were supplied.
 

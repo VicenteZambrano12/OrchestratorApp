@@ -4,7 +4,8 @@ routing: |
   Allowed intent values:
   - create: generate a completely new routine or answer its missing requirements.
   - update_saved: modify a routine backed up in the database. Resolve routine_id
-    from saved_routines and the user's selection; never invent an ID.
+    from saved_routines ONLY for an explicit user selection; otherwise leave it
+    null so the app loads the user's current active routine. Never invent an ID.
   - update_draft: modify the routine currently being generated or previewed.
   - save: the user explicitly confirms saving the most recent preview.
   - no_match: unrelated requests or refusal without any requested edit.

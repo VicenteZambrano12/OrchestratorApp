@@ -1,4 +1,5 @@
 from pydantic import BaseModel, StrictStr, ValidationInfo, field_validator
+from utils.routinemaker.dataclass.models import RoutinePlan
 
 
 class MemoryTurn(BaseModel):
@@ -7,6 +8,7 @@ class MemoryTurn(BaseModel):
 	user_query: StrictStr
 	system_response: StrictStr
 	subsystem_chosen: StrictStr
+	routine: RoutinePlan | None = None
 
 
 class _RoutingSelection(BaseModel):

@@ -2,7 +2,8 @@
 
 Layout (see redis_schema.json): one hash per session id, one field per
 auto-incremental turn id, each value a JSON string with user_query,
-system_response and subsystem_chosen.
+system_response and subsystem_chosen. Routine turns also contain a structured
+routine object, separate from the response message.
 """
 
 import json
@@ -21,10 +22,15 @@ class RedisClient:
         user_query: str,
         system_response: str,
         subsystem_chosen: str,
+        *,
+        routine: dict[str, object] | None = None,
     ) -> int:
         """Append a turn to the session and return its turn id."""
         turn_id = self._last_turn_id(session_id) + 1
-        self.set_turn(session_id, turn_id, user_query, system_response, subsystem_chosen)
+        self.set_turn(
+            session_id, turn_id, user_query, system_response, subsystem_chosen,
+            routine=routine,
+        )
         return turn_id
 
     def set_turn(
@@ -34,12 +40,16 @@ class RedisClient:
         user_query: str,
         system_response: str,
         subsystem_chosen: str,
+        *,
+        routine: dict[str, object] | None = None,
     ) -> None:
-        turn = {
+        turn: dict[str, object] = {
             "user_query": user_query,
             "system_response": system_response,
             "subsystem_chosen": subsystem_chosen,
         }
+        if subsystem_chosen == "routine_maker":
+            turn["routine"] = routine
         self.client.hset(session_id, str(turn_id), json.dumps(turn))
 
     def _turn_ids(self, session_id: str) -> list[int]:

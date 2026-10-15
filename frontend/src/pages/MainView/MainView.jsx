@@ -2,20 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../../i18n'
 import {
-  Activity, ArrowRight, ArrowUp, CheckCheck,
+  Activity, ArrowRight, ArrowUp,
   ChevronRight, CircleHelp, Dumbbell, Flame,
   AlertCircle, MessageSquare, Plus, RotateCcw, Sparkles, X,
 } from 'lucide-react'
 import BrandMark from '../../components/BrandMark/BrandMark'
 import Pipeline from '../../components/Pipeline/Pipeline'
-import RoutinePreview from '../../components/RoutinePreview/RoutinePreview'
 import TrainingPanel from '../../components/TrainingPanel/TrainingPanel'
 import ThemeToggle from '../../components/ThemeToggle/ThemeToggle'
 import LanguageToggle from '../../components/LanguageToggle/LanguageToggle'
 import FailingView from '../FailingView/FailingView'
 import RoutineView from '../../components/RoutineView/RoutineView'
 import { SubsystemResponse } from '../../features/ai-chat/components/SubsystemResponse'
-import { initialMessages, initialRoutine, requestChat } from '../../features/ai-chat/api/chat'
+import { initialMessages, initialRoutine, requestChat, requestRoutineSave } from '../../features/ai-chat/api/chat'
 import UserDialog from '../../components/UserDialog/UserDialog'
 import { setSessionKey } from '../../hooks/session/users'
 
@@ -74,6 +73,7 @@ function MainView({ user, onSwitchUser }) {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
+  const [savingRoutine, setSavingRoutine] = useState(false)
   const [backendDown, setBackendDown] = useState(false)
   const [routine, setRoutine] = useState(restored.routine)
   const [error, setError] = useState(restored.error)
@@ -111,11 +111,17 @@ function MainView({ user, onSwitchUser }) {
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
-  function saveRecommendation(content) {
-    const next = { ...routine, generated: content }
-    setRoutine(next)
-    saveRoutine(next)
-    setTab('routine')
+  function receiveResponse(result) {
+    if (result.savedRoutine) {
+      const next = { ...routine, generated: result.routine }
+      setRoutine(next)
+      saveRoutine(next)
+      setLastQuery('')
+    }
+    setMessages((current) => [
+      ...current.map((message) => result.savedRoutine ? { ...message, awaitingConfirmation: false } : message),
+      { id: crypto.randomUUID(), role: 'assistant', ...result, demo: false },
+    ])
   }
 
   function sendMessage(event) {
@@ -139,7 +145,7 @@ function MainView({ user, onSwitchUser }) {
     try {
       const result = await requestChat(query, sessionId, controller.signal, language, user.id)
       if (controller.signal.aborted) return
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', ...result, demo: false }])
+      receiveResponse(result)
     } catch (requestError) {
       if (controller.signal.aborted) return
       if (requestError.backendDown) setBackendDown(true)
@@ -169,6 +175,26 @@ function MainView({ user, onSwitchUser }) {
     }
   }
 
+  async function confirmRoutine(message) {
+    if (pending) return
+    setPending(true)
+    setSavingRoutine(true)
+    setLastQuery('')
+    setError('')
+    const controller = new AbortController()
+    abortRef.current = controller
+    try {
+      const result = await requestRoutineSave(sessionId, message.draftId, controller.signal, language, user.id)
+      if (controller.signal.aborted) return
+      receiveResponse(result)
+    } catch (requestError) {
+      if (!controller.signal.aborted) setError(t('Could not save routine: {{message}}', { message: requestError.message }))
+    } finally {
+      setSavingRoutine(false)
+      if (!controller.signal.aborted) setPending(false)
+    }
+  }
+
   if (backendDown) return <FailingView onRetry={() => setBackendDown(false)} />
 
   return <div className={`app-shell${tab === 'chat' ? ' chat-shell' : ''}`}>
@@ -192,13 +218,12 @@ function MainView({ user, onSwitchUser }) {
             {messages.map((message) => <article className={`message ${message.role}`} key={message.id}>
               <div className="message-avatar">{message.role === 'assistant' ? <BrandMark small /> : <span className="avatar">{initials}</span>}</div>
               <div className="message-body"><div className="message-heading"><strong>{t(message.role === 'assistant' ? 'Form coach' : 'You')}</strong><span>{message.role === 'assistant' ? <><span className="ai-label">{t('AI')}</span>{message.demo && t('Example response')}</> : t('Just now')}</span></div>
-                {message.role === 'assistant' && <Pipeline subsystem={message.subsystem} demo={message.demo} />}
-                <SubsystemResponse subsystem={message.subsystem} content={message.content} />
-                {message.awaitingConfirmation && <button className="primary-button" disabled={pending || message !== messages.at(-1)} onClick={() => submitQuery(t('Save this routine to the database.'))}>{t('Save routine to database')}</button>}
-                {message.routine && <><RoutinePreview demo={message.demo} onOpen={() => saveRecommendation(message.routine)} /><div className="message-actions"><button onClick={() => saveRecommendation(message.routine)}><Plus size={14} />{t('Save recommendation to My Routine')}</button><span><CheckCheck size={14} />{t('Ready for your review')}</span></div></>}
+                {message.role === 'assistant' && !message.savedRoutine && <Pipeline subsystem={message.subsystem} demo={message.demo} />}
+                <SubsystemResponse subsystem={message.subsystem} content={message.content} savedRoutine={message.savedRoutine} />
+                {message.awaitingConfirmation && <button className="primary-button" disabled={pending || message !== messages.at(-1)} onClick={() => confirmRoutine(message)}>{t('Save routine to database')}</button>}
               </div>
             </article>)}
-            {pending && <article className="message assistant"><div className="message-avatar"><BrandMark small /></div><div className="message-body"><div className="message-heading"><strong>{t('Form coach')}</strong><span>{t('Working on it…')}</span></div><Pipeline pending demo={false} /></div></article>}
+            {pending && <article className="message assistant"><div className="message-avatar"><BrandMark small /></div><div className="message-body"><div className="message-heading"><strong>{t('Form coach')}</strong><span>{t('Working on it…')}</span></div>{savingRoutine ? <p>{t('Saving routine…')}</p> : <Pipeline pending demo={false} />}</div></article>}
           </div>
           {error && <div className="error-message" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span>{lastQuery && <button type="button" className="retry-button" disabled={pending} onClick={() => retryLast()}><RotateCcw size={14} aria-hidden="true" />{t('Retry')}</button>}</div>}
           </div>

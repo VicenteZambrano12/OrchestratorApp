@@ -77,6 +77,28 @@ export function formatRoutine(plan, t) {
 }
 
 export async function requestChat(query, sessionId, signal, language, userId) {
+  return requestChatAction(
+    `${encodeURIComponent(sessionId)}/chat`,
+    { query, language, ...(userId === undefined ? {} : { user_id: userId }) },
+    signal, language, userId,
+  )
+}
+
+export async function requestRoutineSave(sessionId, draftId, signal, language, userId) {
+  if (!Number.isSafeInteger(userId) || userId < 1) throw new Error('Routine user ID must be a positive integer.')
+  if (typeof draftId !== 'string' || !draftId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
+  const result = await requestChatAction(
+    `${encodeURIComponent(sessionId)}/routine/save`,
+    { user_id: userId, draft_id: draftId, language },
+    signal, language, userId,
+  )
+  if (!result.routine || !Number.isSafeInteger(result.routineId) || result.routineId < 1) {
+    throw new Error(result.content || i18n.t('The chat API returned an invalid response.'))
+  }
+  return result
+}
+
+async function requestChatAction(path, payload, signal, language, userId) {
   if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
   if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 1)) throw new Error('Routine user ID must be a positive integer.')
   const t = i18n.getFixedT(language.toLowerCase())
@@ -85,10 +107,10 @@ export async function requestChat(query, sessionId, signal, language, userId) {
   try {
     let response
     try {
-      response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/chat`, {
+      response = await fetch(`${baseUrl}/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, language, ...(userId === undefined ? {} : { user_id: userId }) }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.any([signal, timeoutSignal]),
       })
     } catch (error) {
@@ -123,12 +145,22 @@ export async function requestChat(query, sessionId, signal, language, userId) {
       throw new Error(t('The chat API returned an invalid response.'))
     }
     const routine = result.routine === null ? null : formatRoutine(result.routine, t)
+    if (result.status === 'awaiting_confirmation' &&
+      (!routine || typeof result.draft_id !== 'string' || !result.draft_id.trim())) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
+    if (result.status === 'saved' &&
+      (!routine || !Number.isSafeInteger(result.routine_id) || result.routine_id < 1)) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
     return {
       subsystem: data.subsystem,
-      content: [result.message, routine].filter(Boolean).join('\n\n'),
+      content: result.status === 'saved' ? result.message : [result.message, routine].filter(Boolean).join('\n\n'),
       routine: result.status === 'saved' ? routine : null,
+      savedRoutine: result.status === 'saved' ? { id: result.routine_id, name: result.routine.name } : null,
       awaitingConfirmation: result.status === 'awaiting_confirmation',
       routineId: result.routine_id,
+      draftId: result.draft_id,
     }
   } catch (error) {
     if (timeoutSignal.aborted) throw new Error(t('The coach took too long to respond. Please try again.'), { cause: error })

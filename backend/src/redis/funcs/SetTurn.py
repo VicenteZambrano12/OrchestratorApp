@@ -15,8 +15,10 @@ class SetTurn:
         user_query: str,
         system_response: str,
         subsystem_chosen: str,
+        *,
+        routine: dict[str, object] | None = None,
     ) -> int:
         """Store the next turn for the session and return its turn id."""
         return self.redis_client.add_turn(
-            session_id, user_query, system_response, subsystem_chosen
+            session_id, user_query, system_response, subsystem_chosen, routine=routine,
         )

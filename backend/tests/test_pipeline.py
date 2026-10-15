@@ -11,6 +11,8 @@ from utils.pipeline.dataclass.models import PipelineResult
 from utils.pipeline.func.handle_with_subsystem import handle_with_subsystem
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation
 from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
+from utils.routinemaker.dataclass.models import ROUTINE_PLAN_EXAMPLE, RoutinePlan
+from api.redis_deps import RedisClient, SetTurn, GetNTurns
 
 
 class PipelineTests(unittest.TestCase):
@@ -25,6 +27,73 @@ class PipelineTests(unittest.TestCase):
             "past_routines_analyzer": self.past_routines_analyzer,
         }
         self.pipeline = Pipeline(self.orchestrator, **self.systems)
+
+    def test_routine_plan_is_stored_as_an_object_separate_from_the_message(self):
+        self.orchestrator.route.return_value = "routine_maker"
+        store = RedisClient()
+        pipeline = Pipeline(
+            self.orchestrator, routine_maker=self.routine_maker,
+            turn_setter=SetTurn(store), turn_getter=GetNTurns(store),
+        )
+        plan = RoutinePlan.model_validate(ROUTINE_PLAN_EXAMPLE)
+        self.routine_maker.handle.return_value = RoutineMakerResult(
+            "awaiting_confirmation", RoutineParameters(days_per_week=1),
+            "Your draft is ready.", plan,
+        )
+        pipeline.handle("Create a plan", session_id="session", user_id=1)
+        first = store.get_turn("session", 1)
+        self.assertEqual(first, {
+            "user_query": "Create a plan", "system_response": "Your draft is ready.",
+            "subsystem_chosen": "routine_maker", "routine": plan.model_dump(),
+        })
+        self.assertIsInstance(first["routine"]["days"], list)
+        self.assertIsInstance(first["routine"]["days"][0]["exercises"], list)
+        self.assertEqual(first["routine"]["days"][0]["exercises"][0]["reps"], "8-12")
+        self.assertNotIn("weight", first["routine"]["days"][0]["exercises"][0])
+        plan.days[0].exercises[0].sets = 4
+        pipeline.handle("Make it four sets", session_id="session", user_id=1)
+        second = store.get_turn("session", 2)
+        self.assertEqual(first["routine"]["days"][0]["exercises"][0]["sets"], 3)
+        self.assertEqual(second["routine"]["days"][0]["exercises"][0]["sets"], 4)
+        self.assertEqual(self.orchestrator.route.call_args.args[0]["memory"], [first])
+        self.assertEqual(store.get_turn("session", 1), first)
+
+    def test_routine_parameter_turn_stores_null_plan_and_other_systems_keep_their_shape(self):
+        store = RedisClient()
+        pipeline = Pipeline(
+            self.orchestrator, routine_maker=self.routine_maker,
+            turn_setter=SetTurn(store), turn_getter=GetNTurns(store),
+        )
+        self.orchestrator.route.return_value = "routine_maker"
+        self.routine_maker.handle.return_value = RoutineMakerResult(
+            "needs_parameters", RoutineParameters(), "How many days?", None,
+        )
+        pipeline.handle("Create a plan", session_id="session", user_id=1)
+        self.assertEqual(store.get_turn("session", 1)["routine"], None)
+        self.orchestrator.route.return_value = "no_system"
+        self.orchestrator.no_system_message.return_value = "Not supported."
+        pipeline.handle("Unrelated", session_id="session", user_id=1)
+        self.assertEqual(store.get_turn("session", 2), {
+            "user_query": "Unrelated", "system_response": "Not supported.",
+            "subsystem_chosen": "no_system",
+        })
+
+    def test_real_orchestrator_preserves_structured_routine_memory_for_followups(self):
+        selector = Mock(return_value="routine_maker")
+        orchestrator = Orchestrator(selector)
+        plan = RoutinePlan.model_validate(ROUTINE_PLAN_EXAMPLE)
+        turn = {
+            "user_query": "Create a plan", "system_response": "Your draft is ready.",
+            "subsystem_chosen": "routine_maker", "routine": plan.model_dump(),
+        }
+        self.assertEqual(orchestrator.route({"query": "Change this routine", "memory": [turn]}), "routine_maker")
+        self.assertEqual(selector.call_args.args[3], [turn])
+        chat_model = Mock(return_value="routine_maker")
+        orchestrator = Orchestrator.from_chat_model(chat_model)
+        orchestrator.route({"query": "Change this routine", "memory": [turn]})
+        payload = chat_model.call_args.args[0][1]["content"]
+        self.assertIn('"routine": {', payload)
+        self.assertIn('"reps": "8-12"', payload)
 
     def test_exercise_list_is_serialized_into_memory_and_reused(self):
         exercise = ExerciseExplanation(

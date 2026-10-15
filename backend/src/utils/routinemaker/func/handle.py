@@ -17,6 +17,52 @@ class RoutineStore(Protocol):
     def set_routine_state(self, session_id: str, user_id: int, state: str) -> None: ...
 
 
+def save_draft(
+    *,
+    repository: RoutineRepository,
+    state_store: RoutineStore,
+    session_id: str,
+    user_id: int,
+    language: str = "EN",
+    draft_id: str | None = None,
+) -> RoutineMakerResult:
+    """Persist the cached preview without invoking a model."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise RoutineInputError("Routine requests require a session_id.")
+    if language not in ("EN", "ES"):
+        raise RoutineInputError("language must be EN or ES")
+    repository.validate_user(user_id)
+    cached = state_store.get_routine_state(session_id, user_id)
+    state = RoutineState.model_validate_json(cached) if cached else RoutineState()
+    if draft_id is not None and draft_id != state.draft_id:
+        raise RoutineInputError("This draft is no longer available. Review the latest routine preview.")
+    already_saved = draft_id is not None and state.saved_routine_id is not None
+    if (
+        (not state.awaiting_confirmation and not already_saved)
+        or state.routine is None or state.draft_id is None
+    ):
+        return RoutineMakerResult(
+            "needs_routine", state.parameters,
+            "No hay un borrador pendiente de confirmar. Genera o modifica una rutina primero."
+            if language == "ES" else
+            "There is no draft awaiting confirmation. Generate or modify a routine first.",
+            state.routine,
+        )
+    if not already_saved:
+        state.saved_routine_id = repository.save(
+            user_id, state.routine, state.parameters, state.draft_id, state.source_routine_id,
+        )
+        state.awaiting_confirmation = False
+        state_store.set_routine_state(session_id, user_id, state.model_dump_json())
+    return RoutineMakerResult(
+        "saved", state.parameters,
+        "Guardada como una nueva version y seleccionada como tu rutina actual."
+        if language == "ES" else
+        "Saved as a new version and selected as your current routine.",
+        state.routine, state.saved_routine_id,
+    )
+
+
 def handle(
     generate_response: Callable[[str, dict[str, object]], str],
     query: str,
@@ -68,6 +114,7 @@ def handle(
         return RoutineMakerResult(
             status, state.parameters, message, state.routine,
             state.saved_routine_id if status == "saved" else None,
+            state.draft_id if status == "awaiting_confirmation" else None,
         )
 
     def localized(en: str, es: str) -> str:
@@ -76,19 +123,10 @@ def handle(
     if decision.intent == "no_match":
         return result("no_match", decision.message.strip(), persist=False)
     if decision.intent == "save":
-        if not state.awaiting_confirmation or state.routine is None or state.draft_id is None:
-            return result("needs_routine", localized(
-                "There is no draft awaiting confirmation. Generate or modify a routine first.",
-                "No hay un borrador pendiente de confirmar. Genera o modifica una rutina primero.",
-            ), persist=False)
-        state.saved_routine_id = repository.save(
-            user_id, state.routine, state.parameters, state.draft_id, state.source_routine_id,
+        return save_draft(
+            repository=repository, state_store=state_store,
+            session_id=session_id, user_id=user_id, language=language,
         )
-        state.awaiting_confirmation = False
-        return result("saved", localized(
-            "Saved as a new routine version. Your existing routines are unchanged.",
-            "Guardada como una nueva version. Tus rutinas anteriores no han cambiado.",
-        ))
 
     loaded_parameters: RoutineParameters | None = None
     if decision.intent == "create":
@@ -98,8 +136,12 @@ def handle(
     elif decision.intent == "update_saved":
         selected = decision.routine_id
         choices = repository.routines(user_id)
-        if selected is None and state.workflow == "update_saved":
+        if selected is None and state.workflow == "update_saved" and state.saved_routine_id is None:
             selected = state.source_routine_id
+        if selected is None:
+            current = [row for row in choices if row["is_active"]]
+            if len(current) == 1:
+                selected = current[0]["id"]
         if selected is None and len(choices) == 1:
             only_id = choices[0]["id"]
             if not isinstance(only_id, int):

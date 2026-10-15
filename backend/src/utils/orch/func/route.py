@@ -29,7 +29,7 @@ def route(
 		raise ValueError("language must be ES (Spanish) or EN (English)")
 
 	memory = [
-		MemoryTurn.model_validate(turn).model_dump()
+		MemoryTurn.model_validate(turn).model_dump(exclude_unset=True)
 		for turn in payload.get("memory") or []
 	]
 

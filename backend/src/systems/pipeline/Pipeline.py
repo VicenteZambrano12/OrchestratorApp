@@ -111,7 +111,13 @@ class Pipeline:
         )
         if session_id is not None and self._turn_setter is not None:
             response = result.response
-            if not isinstance(response, str):
-                response = json.dumps(response, default=_dump_model)
-            self._turn_setter.set(session_id, query, response, result.subsystem)
+            if isinstance(response, RoutineMakerResult):
+                self._turn_setter.set(
+                    session_id, query, response.message, result.subsystem,
+                    routine=response.routine.model_dump(mode="json") if response.routine else None,
+                )
+            else:
+                if not isinstance(response, str):
+                    response = json.dumps(response, default=_dump_model)
+                self._turn_setter.set(session_id, query, response, result.subsystem)
         return result

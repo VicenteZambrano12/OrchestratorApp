@@ -205,3 +205,10 @@ class RoutineMakerResult:
         int | None,
         Field(description="ID of the newly saved version, otherwise null.", examples=[None, 1]),
     ] = None
+    draft_id: Annotated[
+        str | None,
+        Field(
+            description="Preview identifier required by the direct-save endpoint; null without a saveable draft.",
+            examples=[None, "draft-123"],
+        ),
+    ] = None

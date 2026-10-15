@@ -127,7 +127,7 @@ test('each chat request sends the exact uppercase language and preserves its res
   await assert.rejects(chat.requestChat('Question', 'session', new AbortController().signal, 'es'), /EN or ES/)
 })
 
-test('routine drafts render structured days but only confirmed versions can be copied locally', async () => {
+test('routine drafts render structured days but only saved versions provide a recommendation for automatic storage', async () => {
   const routine = {
     name: 'PPL', recovery: 'Rest between days.',
     days: [{
@@ -140,17 +140,136 @@ test('routine drafts render structured days but only confirmed versions can be c
       assert.equal(JSON.parse(options.body).user_id, 7)
       return Response.json({
         subsystem: 'routine_maker',
-        response: { status, message: 'Review this routine.', routine, routine_id: status === 'saved' ? 5 : null },
+        response: { status, message: 'Review this routine.', routine, routine_id: status === 'saved' ? 5 : null, draft_id: status === 'awaiting_confirmation' ? 'preview-1' : null },
       })
     })
     try {
       const result = await chat.requestChat('Make a routine', 'session', new AbortController().signal, 'EN', 7)
-      assert.match(result.content, /Push/)
-      assert.match(result.content, /Bench Press/)
-      assert.match(result.content, /ID 1/)
+      if (status === 'saved') {
+        assert.equal(result.content, 'Review this routine.')
+        assert.deepEqual(result.savedRoutine, { id: 5, name: 'PPL' })
+        assert.match(result.routine, /Bench Press/)
+      } else {
+        assert.match(result.content, /Push/)
+        assert.match(result.content, /Bench Press/)
+        assert.match(result.content, /ID 1/)
+        assert.equal(result.savedRoutine, null)
+      }
       assert.equal(result.awaitingConfirmation, status === 'awaiting_confirmation')
+      assert.equal(result.draftId, status === 'awaiting_confirmation' ? 'preview-1' : null)
       if (status === 'saved') assert.equal(typeof result.routine, 'string')
       else assert.equal(result.routine, null)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+})
+
+test('direct routine save posts the draft identity without a chat query', async () => {
+  const routine = {
+    name: 'Push', recovery: 'Rest.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  for (const language of ['EN', 'ES']) {
+    const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
+      assert.equal(url, '/api/test%20session/routine/save')
+      assert.equal(options.method, 'POST')
+      assert.deepEqual(JSON.parse(options.body), { user_id: 7, draft_id: 'draft-1', language })
+      return Response.json({
+        subsystem: 'routine_maker',
+        response: { status: 'saved', message: 'Saved.', routine, routine_id: 8, draft_id: null },
+      })
+    })
+    try {
+      const result = await chat.requestRoutineSave('test session', 'draft-1', new AbortController().signal, language, 7)
+      assert.equal(result.routineId, 8)
+      assert.equal(result.awaitingConfirmation, false)
+      assert.equal(result.content, 'Saved.')
+      assert.deepEqual(result.savedRoutine, { id: 8, name: 'Push' })
+      assert.match(result.routine, /Bench Press/)
+      assert.equal(fetch.mock.callCount(), 1)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+})
+
+test('button and chat saves render the same localized confirmation without repeating the plan', async () => {
+  const routine = {
+    name: 'My saved plan', recovery: 'Rest between days.',
+    days: [{
+      day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+      exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+    }],
+  }
+  for (const language of ['en', 'es']) {
+    await translations.setLanguage(language)
+    const message = language === 'en' ? 'Selected as your current routine.' : 'Seleccionada como tu rutina actual.'
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
+      subsystem: 'routine_maker',
+      response: { status: 'saved', message, routine, routine_id: 42, draft_id: null },
+    }))
+    try {
+      const signal = new AbortController().signal
+      const buttonSave = await chat.requestRoutineSave('session', 'draft', signal, language.toUpperCase(), 7)
+      const chatSave = await chat.requestChat('Save this routine', 'session', signal, language.toUpperCase(), 7)
+      const render = (result) => renderToStaticMarkup(createElement(SubsystemResponse, result))
+      const markup = render(buttonSave)
+      assert.equal(markup, render(chatSave))
+      assert.match(markup, /class="saved-routine"/)
+      assert.ok(markup.includes(language === 'es' ? 'Rutina guardada' : 'Routine saved'))
+      assert.ok(!markup.includes('42'))
+      assert.equal(markup.split('My saved plan').length - 1, 1)
+      assert.equal(markup.split(message).length - 1, 1)
+      assert.equal((markup.match(/<button/g) || []).length, 0)
+      assert.ok(!markup.includes('Bench Press') && !markup.includes('Rest between days.'))
+      assert.match(buttonSave.routine, /Bench Press/)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+})
+
+test('saved routine responses require a valid routine and database ID for either save path', async () => {
+  for (const routineId of [null, 0, '42']) {
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
+      subsystem: 'routine_maker',
+      response: {
+        status: 'saved', message: 'Saved.', routine_id: routineId,
+        routine: {
+          name: 'Push', recovery: 'Rest.',
+          days: [{
+            day: 1, day_type: 'Push', info: 'Warm up.', duration_minutes: 45,
+            exercises: [{ exercise_id: 1, name: 'Bench Press', sets: 3, reps: '8-12', rest_seconds: 90, notes: '' }],
+          }],
+        },
+      },
+    }))
+    try {
+      await translations.setLanguage('en')
+      const signal = new AbortController().signal
+      await assert.rejects(chat.requestChat('Save it', 'session', signal, 'EN', 7), /invalid response/)
+      await assert.rejects(chat.requestRoutineSave('session', 'draft', signal, 'EN', 7), /invalid response/)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+})
+
+test('direct save surfaces stale drafts and server failures without falling back to chat', async () => {
+  for (const status of [422, 500]) {
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({
+      detail: [{ msg: 'This draft is no longer available.' }],
+    }, { status }))
+    try {
+      await assert.rejects(
+        chat.requestRoutineSave('session', 'old-draft', new AbortController().signal, 'EN', 7),
+        new RegExp(`HTTP ${status}`),
+      )
+      assert.equal(fetch.mock.callCount(), 1)
     } finally {
       fetch.mock.restore()
     }

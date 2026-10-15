@@ -103,8 +103,9 @@ class RoutineRepository:
             ).fetchone()
             if existing is not None:
                 return existing["id"]
+            db.execute("UPDATE dim_routines SET is_active = 0 WHERE user_id = ?", (user_id,))
             cursor = db.execute(
-                "INSERT INTO dim_routines (user_id, name, description, is_active) VALUES (?, ?, ?, 0)",
+                "INSERT INTO dim_routines (user_id, name, description, is_active) VALUES (?, ?, ?, 1)",
                 (user_id, plan.name, document),
             )
             if cursor.lastrowid is None:

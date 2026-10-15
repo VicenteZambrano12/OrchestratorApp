@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
@@ -13,6 +13,7 @@ from systems.routinemaker.RoutineMaker import RoutineMaker
 from utils.general.GeminiApiCall import GeminiClient
 from utils.routinemaker.dataclass.models import RoutineParameters, RoutinePlan, RoutineState
 from utils.routinemaker.func.repository import RoutineInputError
+from utils.routinemaker.func.handle import save_draft
 
 
 COMPLETE = {
@@ -138,7 +139,7 @@ class RoutineMakerTests(unittest.TestCase):
         result = self.turn(decision("save"), query="Yes, save it")
         self.assertEqual(result.status, "saved")
         self.assertEqual(result.routine_id, self.rows()[0][0])
-        self.assertEqual(self.rows()[0][4], 0)
+        self.assertEqual(self.rows()[0][4], 1)
         stored, parameters = self.maker._repository.load(1, result.routine_id)
         self.assertEqual(stored, preview.routine)
         self.assertEqual(parameters.model_dump(), COMPLETE)
@@ -229,7 +230,7 @@ class RoutineMakerTests(unittest.TestCase):
         )
         self.assertEqual(len(result.routine.days[0].exercises), 1)
 
-    def test_saved_modification_loads_context_and_saves_new_inactive_version(self):
+    def test_saved_modification_loads_context_and_saves_new_active_version(self):
         saved = self.saved()
         with sqlite3.connect(self.database) as db:
             db.execute("UPDATE dim_routines SET is_active = 1 WHERE id = ?", (saved.routine_id,))
@@ -249,13 +250,16 @@ class RoutineMakerTests(unittest.TestCase):
         result = self.turn(decision("save"), session_id="another-session")
         self.assertEqual(result.status, "saved")
         self.assertNotEqual(result.routine_id, saved.routine_id)
-        self.assertEqual(self.rows()[0], original)
-        self.assertEqual(self.rows()[1][4], 0)
+        self.assertEqual(self.rows()[0][:4], original[:4])
+        self.assertEqual(self.rows()[0][4], 0)
+        self.assertEqual(self.rows()[1][4], 1)
         self.assertEqual(json.loads(self.rows()[1][3])["source_routine_id"], saved.routine_id)
 
     def test_selecting_saved_routine_asks_when_ambiguous(self):
         self.saved()
         self.saved()
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE dim_routines SET is_active = 0")
         result = self.turn(decision("update_saved"), session_id="new")
         self.assertEqual(result.status, "needs_routine")
         self.assertIn("ID", result.message)
@@ -264,6 +268,8 @@ class RoutineMakerTests(unittest.TestCase):
     def test_edit_details_survive_saved_routine_selection(self):
         saved = self.saved()
         self.saved()
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE dim_routines SET is_active = 0")
         first = self.turn(decision("update_saved", change={
             "action": "replace", "day": 1, "exercise_id": 1, "replacement_exercise_id": 6,
         }), session_id="selection")
@@ -281,6 +287,8 @@ class RoutineMakerTests(unittest.TestCase):
     def test_parameter_changes_survive_saved_routine_selection(self):
         saved = self.saved()
         self.saved()
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE dim_routines SET is_active = 0")
         self.turn(decision("update_saved", {"days_per_week": 2}), session_id="selection")
         changed = plan()
         changed["days"].pop()
@@ -290,6 +298,93 @@ class RoutineMakerTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "awaiting_confirmation")
         self.assertEqual(len(result.routine.days), 2)
+
+    def test_update_automatically_loads_current_routine_among_multiple_versions(self):
+        self.saved()
+        current = self.saved()
+        changed = plan()
+        changed["days"][0]["exercises"][0]["sets"] = 4
+        result = self.turn(
+            decision("update_saved", change={
+                "action": "adjust", "day": 1, "exercise_id": 1, "details": "4 sets",
+            }),
+            json.dumps(changed), session_id="current",
+        )
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertEqual(self.state("current").source_routine_id, current.routine_id)
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_direct_save_is_model_free_and_idempotent(self):
+        preview = self.draft()
+        self.client.generate.reset_mock()
+        for _ in range(2):
+            result = save_draft(
+                repository=self.maker._repository, state_store=self.store,
+                session_id="session", user_id=1, draft_id=preview.draft_id,
+            )
+            self.assertEqual(result.status, "saved")
+            self.assertEqual(result.routine, preview.routine)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.rows()[0][4], 1)
+        self.client.generate.assert_not_called()
+
+    def test_direct_save_rejects_stale_preview_after_incomplete_edit(self):
+        preview = self.draft()
+        self.turn(decision("update_draft"), "What changes?")
+        result = save_draft(
+            repository=self.maker._repository, state_store=self.store,
+            session_id="session", user_id=1, draft_id=preview.draft_id,
+        )
+        self.assertEqual(result.status, "needs_routine")
+        self.assertEqual(self.rows(), [])
+
+    def test_direct_save_retry_after_cache_failure_does_not_duplicate_or_reactivate(self):
+        preview = self.draft()
+        with patch.object(self.store, "set_routine_state", side_effect=RuntimeError("Cache unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "Cache unavailable"):
+                save_draft(
+                    repository=self.maker._repository, state_store=self.store,
+                    session_id="session", user_id=1, draft_id=preview.draft_id,
+                )
+        self.assertEqual(len(self.rows()), 1)
+        old_id = self.rows()[0][0]
+        self.turn(decision(parameters=COMPLETE), json.dumps(plan()), session_id="new-session")
+        current = self.turn(decision("save"), session_id="new-session")
+        result = save_draft(
+            repository=self.maker._repository, state_store=self.store,
+            session_id="session", user_id=1, draft_id=preview.draft_id,
+        )
+        self.assertEqual(result.routine_id, old_id)
+        self.assertEqual(
+            [(row[0], row[4]) for row in self.rows()],
+            [(old_id, 0), (current.routine_id, 1)],
+        )
+
+    def test_saving_new_version_only_changes_its_owners_active_selection(self):
+        first = self.saved()
+        self.turn(decision(parameters=COMPLETE), json.dumps(plan()), user_id=2)
+        other = self.turn(decision("save"), user_id=2)
+        current = self.saved()
+        self.assertEqual(
+            [(row[0], row[1], row[4]) for row in self.rows()],
+            [(first.routine_id, 1, 0), (other.routine_id, 2, 1), (current.routine_id, 1, 1)],
+        )
+
+    def test_failed_insert_rolls_back_active_selection(self):
+        first = self.saved()
+        preview = self.draft()
+        with sqlite3.connect(self.database) as db:
+            db.execute(
+                "CREATE TRIGGER fail_save BEFORE INSERT ON dim_routines "
+                "BEGIN SELECT RAISE(ABORT, 'Save failed'); END"
+            )
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "Save failed"):
+            save_draft(
+                repository=self.maker._repository, state_store=self.store,
+                session_id="session", user_id=1, draft_id=preview.draft_id,
+            )
+        self.assertEqual([(row[0], row[4]) for row in self.rows()], [(first.routine_id, 1)])
+        self.assertTrue(self.state().awaiting_confirmation)
 
     def test_exact_minimum_and_maximum_training_day_counts(self):
         for count in (1, 7):

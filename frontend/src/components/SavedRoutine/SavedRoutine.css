@@ -1,0 +1,4 @@
+.saved-routine { display: grid; gap: 12px; margin-top: 12px; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-surface); color: var(--text-secondary); overflow-wrap: anywhere; box-shadow: var(--shadow-card); }
+.saved-routine header { display: flex; align-items: center; gap: 12px; color: var(--accent-primary); }
+.saved-routine h3 { margin: 0 0 4px; color: var(--text-primary); font-size: 15px; }
+.saved-routine p { margin: 0; font-size: 13px; line-height: 1.6; }
