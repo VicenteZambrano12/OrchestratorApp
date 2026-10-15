@@ -27,16 +27,28 @@ A responsive React + Vite mockup for OrchestratorApp, with two views:
 Use **Live system map** in the header to open a separate, resizable browser window.
 Move it independently (including to another display) while using chat. It stays
 connected to the latest request, including when opened midway through a response.
+The entire tree, including optional branches, SQL, sources, and the response node,
+is visible before execution. The tree automatically fits the window on resize,
+without internal graph scrollbars or nodes being added as execution progresses.
+Repeated queries and per-exercise explanations reuse their stage nodes; every
+individual event remains available in the right-hand execution log.
+
 Executed routes glow, the current node animates, unused subsystem branches remain
-muted, and failures mark the interrupted node. Zoom controls and scrollbars support
-larger diagrams; selecting a query reveals its SQL template and database source.
+muted, and failures mark the interrupted node. Visual playback advances once per
+second, including a separate step for each SQL source; this never delays network
+requests or the chat answer. The status shows **Playing execution** if the API has
+already finished but the visualization is catching up. The right-hand panel shows
+the chat and routine-save API responses as soon as they arrive, the selected/current node's details,
+and execution events as playback reveals them. Only this panel scrolls vertically;
+SQL and JSON wrap rather than producing nested horizontal scrollbars.
 The map resets for each request or new conversation, closes when switching users,
 and follows the application's theme and language. Allow pop-ups for this site if
 the browser blocks the window.
 
 SQL events cover chat's history SQL client, exercise catalog, and routine repository.
-Parameters, rows, absolute database paths, and private model reasoning are not
-exposed. Database source nodes identify the actual SQLite file used, not a guessed
+SQL event parameters, result rows, absolute database paths, and private model reasoning
+are not exposed. The normal chat API response is shown unchanged and may include
+the selected user's workout rows. Database source nodes identify the actual SQLite file used, not a guessed
 source. A direct routine-save button shows its save stage but does not invent SQL
 events for the separate, non-streaming save endpoint. JSON-only servers explicitly
 show that execution events are unavailable.

@@ -84,7 +84,7 @@ export async function requestChat(query, sessionId, signal, language, userId, on
   try {
     signal?.throwIfAborted()
     report({ id: 'routine_save', label: 'Saving your confirmed routine' })
-    const saved = await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId)
+    const saved = await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId, onResponse)
     return { ...saved, steps: [...steps] }
   } catch (error) {
     error.routineToSave = result
@@ -92,12 +92,13 @@ export async function requestChat(query, sessionId, signal, language, userId, on
   }
 }
 
-export async function requestRoutineSave(sessionId, routine, draftId, signal, language, userId) {
+export async function requestRoutineSave(sessionId, routine, draftId, signal, language, userId, onResponse) {
   if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
   if (!Number.isSafeInteger(userId) || userId < 1) throw new Error('Routine user ID must be a positive integer.')
   if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
   if (typeof draftId !== 'string' || !draftId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
   const saved = await saveUserRoutine(userId, routine, signal, { sessionId, draftId, language })
+  onResponse?.(saved, 'PUT /users/{user_id}/routine')
   const t = i18n.getFixedT(language.toLowerCase())
   return {
     subsystem: 'routine_maker',
@@ -148,7 +149,7 @@ async function requestChatAction(path, payload, signal, language, userId, onProg
       : await response.json()
     if (!data || typeof data !== 'object') throw new Error(t('The chat API returned an invalid response.'))
     if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error(t('The chat API returned an unknown subsystem.'))
-    onResponse?.(data)
+    onResponse?.(data, 'POST /{id}/chat')
     if (typeof data.response === 'string') return { subsystem: data.subsystem, content: data.response }
     if (data.subsystem === 'exercise_explainer') {
       if (!isExerciseList(data.response)) throw new Error(t('The chat API returned an invalid exercise list.'))

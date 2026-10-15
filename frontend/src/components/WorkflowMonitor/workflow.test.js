@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { after, before, test } from 'node:test'
+import { after, before, mock, test } from 'node:test'
 import { act, createElement } from 'react'
 import { Window } from 'happy-dom'
 import { createServer } from 'vite'
-import { buildWorkflowGraph, branches } from './workflowGraph.js'
+import { buildWorkflowGraph, branches, fitWorkflowGraph, playbackEvents } from './workflowGraph.js'
 import { readChatStream } from '../../features/ai-chat/api/readChatStream.js'
 
 const steps = [
@@ -14,21 +14,44 @@ const steps = [
 ]
 
 test('graph highlights only the executed branch and attaches SQL and source nodes', () => {
-  const { nodes, height } = buildWorkflowGraph(steps, 'running')
-  assert.equal(nodes.find(({ id }) => id === 'sql_1').state, 'active')
-  assert.equal(nodes.find(({ id }) => id === 'sql_1').parent, 'exercise_catalog')
-  assert.equal(nodes.find(({ id }) => id === 'sql_1_source').label, 'SQLite / gym_app.db')
-  assert.equal(nodes.find(({ id }) => id === 'sql_1_source').parent, 'sql_1')
-  assert.ok(nodes.filter(({ branch }) => branch === 'exercise_explainer').every(({ x }) => x === 355))
+  const events = playbackEvents(steps, 'running')
+  const { nodes, height } = buildWorkflowGraph(events, 'running')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_sql').state, 'done')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_sql').parent, 'exercise_catalog')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_source').label, 'SQLite / gym_app.db')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_source').parent, 'exercise_sql')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_source').state, 'active')
+  assert.equal(nodes.find(({ id }) => id === 'exercise_sql').x, 355)
   assert.ok(branches.filter(({ id }) => id !== 'exercise_explainer').every(
     (branch) => nodes.find(({ id }) => id === branch.id).state === 'idle',
   ))
   assert.ok(height > 560)
-  const failed = buildWorkflowGraph(steps, 'failed').nodes
-  assert.equal(failed.find(({ id }) => id === 'sql_1').state, 'failed')
-  assert.equal(failed.find(({ id }) => id === 'sql_1_source').state, 'failed')
-  assert.ok(buildWorkflowGraph(steps, 'complete').nodes.every(({ state }) => state !== 'active'))
+  const failed = buildWorkflowGraph(events, 'failed').nodes
+  assert.equal(failed.find(({ id }) => id === 'exercise_source').state, 'failed')
+  assert.ok(buildWorkflowGraph(events, 'complete').nodes.every(({ state }) => state !== 'active'))
   assert.ok(buildWorkflowGraph([], 'idle').nodes.every(({ state }) => state === 'idle'))
+})
+
+test('entire tree has stable positions before, during, and after execution and fits the available space', () => {
+  const idle = buildWorkflowGraph([], 'idle')
+  const completed = buildWorkflowGraph(playbackEvents([
+    ...steps,
+    ...Array.from({ length: 200 }, (_, index) => ({ ...steps.at(-1), id: `sql_${index}` })),
+    { id: 'response', label: 'Your response is ready' },
+  ], 'complete'), 'complete')
+  assert.deepEqual(completed.nodes.map(({ id, x, y }) => ({ id, x, y })),
+    idle.nodes.map(({ id, x, y }) => ({ id, x, y })))
+  assert.equal(idle.nodes.length, 25)
+  for (const id of ['routine_updater', 'routine_build', 'routine_save', 'weekly_performance', 'past_day_exercise', 'compare_last_two_workouts', 'response']) {
+    assert.ok(idle.nodes.some((node) => node.id === id))
+  }
+  for (const size of [{ width: 1000, height: 700 }, { width: 400, height: 250 }, { width: 0, height: 0 }]) {
+    const scale = fitWorkflowGraph(size, idle)
+    assert.ok(idle.width * scale <= size.width + 0.001)
+    assert.ok(idle.height * scale <= size.height + 0.001)
+    assert.ok(idle.nodes.every(({ x, y }) => x >= 0 && y >= 0 &&
+      (x + 280) * scale <= size.width + 0.001 && (y + 76) * scale <= size.height + 0.001))
+  }
 })
 
 test('NDJSON keeps SQL metadata across fragmented chunks and rejects invalid metadata', async () => {
@@ -53,6 +76,7 @@ test('NDJSON keeps SQL metadata across fragmented chunks and rejects invalid met
 let server
 let Monitor
 let translations
+let chat
 const initialGlobals = new Map()
 let initialWindow
 before(async () => {
@@ -64,6 +88,7 @@ before(async () => {
   server = await createServer({ server: { middlewareMode: true, ws: false, hmr: false }, appType: 'custom' })
   Monitor = (await server.ssrLoadModule('/src/components/WorkflowMonitor/WorkflowMonitor.jsx')).default
   translations = await server.ssrLoadModule('/src/i18n/index.jsx')
+  chat = await server.ssrLoadModule('/src/features/ai-chat/api/chat.jsx')
 })
 after(async () => {
   await server?.close()
@@ -71,6 +96,45 @@ after(async () => {
   for (const [key, descriptor] of initialGlobals) {
     if (descriptor) Object.defineProperty(globalThis, key, descriptor)
     else delete globalThis[key]
+  }
+})
+
+test('chat delivers the unchanged API envelope to the monitor without delaying its result', async () => {
+  const response = { subsystem: 'no_system', response: 'API response text' }
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json(response))
+  const received = []
+  try {
+    const result = await chat.requestChat('Hello', 'session', new AbortController().signal, 'EN', undefined, undefined,
+      (data) => received.push(data))
+    assert.equal(result.content, response.response)
+    assert.deepEqual(received, [response])
+  } finally {
+    fetch.mock.restore()
+  }
+})
+
+test('automatic routine saves publish both actual API responses with their endpoints', async () => {
+  const routine = {
+    name: 'Plan', summary: 'Train', recovery: 'Rest',
+    days: [{ day: 1, day_type: 'Push', info: 'Warm up', duration_minutes: 30,
+      exercises: [{ exercise_id: 1, name: 'Bench press', sets: 3, reps: '8', rest_seconds: 90, notes: '' }] }],
+  }
+  const envelope = { subsystem: 'routine_maker', response: {
+    status: 'save_requested', message: 'Save this plan', routine, draft_id: 'draft-1',
+  } }
+  const fetch = mock.method(globalThis, 'fetch', async (_url, options) =>
+    Response.json(options.method === 'POST' ? envelope : routine))
+  const received = []
+  try {
+    const result = await chat.requestChat('Save it', 'session', new AbortController().signal, 'EN', 1, undefined,
+      (data, endpoint) => received.push({ data, endpoint }))
+    assert.deepEqual(received, [
+      { data: envelope, endpoint: 'POST /{id}/chat' },
+      { data: routine, endpoint: 'PUT /users/{user_id}/routine' },
+    ])
+    assert.equal(result.savedRoutine.name, 'Plan')
+  } finally {
+    fetch.mock.restore()
   }
 })
 
@@ -100,14 +164,25 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     window.open = () => child
     await act(async () => container.querySelector('button').click())
     assert.ok(child.document.querySelector('.workflow-monitor'))
+    assert.equal(child.document.querySelectorAll('.workflow-node').length, 25)
     assert.equal(container.querySelector('[role="alert"]'), null)
-    await act(async () => render({ steps, status: 'running', query: 'Explain a squat' }))
+    mock.timers.enable({ apis: ['setTimeout'] })
+    const trace = { id: 'request-1', steps, status: 'complete', query: 'Explain a squat', response: { subsystem: 'exercise_explainer', response: 'Already available' } }
+    await act(async () => render(trace))
     assert.match(child.document.body.textContent, /Explain a squat/)
     assert.ok(child.document.querySelector('.workflow-node.active'))
-    await act(async () => [...child.document.querySelectorAll('.workflow-node')].find(
-      (node) => node.textContent.includes('SQL query'),
-    ).click())
-    assert.match(child.document.querySelector('pre').textContent, /WHERE id = \?/)
+    assert.match(child.document.querySelector('.workflow-api-response').textContent, /Already available/)
+    assert.match(child.document.querySelector('[role="status"]').textContent, /Playing execution/)
+    assert.equal(child.document.querySelectorAll('.workflow-node').length, 25)
+    assert.equal(child.document.querySelectorAll('.workflow-event-log details').length, 1)
+    await act(async () => mock.timers.tick(999))
+    assert.equal(child.document.querySelector('[data-node-id="orchestrator"]').classList.contains('idle'), true)
+    await act(async () => mock.timers.tick(1))
+    assert.equal(child.document.querySelector('[data-node-id="orchestrator"]').classList.contains('active'), true)
+    for (let index = 0; index < 3; index++) await act(async () => mock.timers.tick(1000))
+    assert.equal(child.document.querySelector('[data-node-id="exercise_sql"]').classList.contains('active'), true)
+    await act(async () => child.document.querySelector('[data-node-id="exercise_sql"]').click())
+    assert.match(child.document.querySelector('.workflow-inspector pre').textContent, /WHERE id = \?/)
     await act(async () => {
       document.documentElement.className = 'dark'
       await translations.setLanguage('es')
@@ -116,8 +191,22 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     assert.equal(child.document.documentElement.className, 'dark')
     assert.equal(child.document.documentElement.lang, 'es')
     assert.match(child.document.body.textContent, /Consulta SQL/)
-    await act(async () => render({ steps, status: 'failed', query: 'Explain a squat', error: 'Connection lost' }))
+    await act(async () => render({ ...trace, status: 'failed', error: 'Connection lost' }))
     assert.match(child.document.querySelector('[role="alert"]').textContent, /Connection lost/)
+    await act(async () => mock.timers.tick(1000))
+    assert.equal(child.document.querySelector('[data-node-id="exercise_source"]').classList.contains('active'), true)
+    await act(async () => mock.timers.tick(1000))
+    assert.equal(child.document.querySelector('[data-node-id="exercise_source"]').classList.contains('failed'), true)
+    await act(async () => render({ id: 'request-2', steps: [], status: 'running', query: 'Next request' }))
+    assert.equal(child.document.querySelectorAll('.workflow-event-log details').length, 1)
+    assert.equal(child.document.querySelectorAll('.workflow-node.done').length, 0)
+    await act(async () => render({ id: 'request-2', steps: steps.slice(0, 1), status: 'running', query: 'Next request' }))
+    await act(async () => mock.timers.tick(500))
+    await act(async () => render({ id: 'request-2', steps, status: 'running', query: 'Next request' }))
+    await act(async () => mock.timers.tick(499))
+    assert.equal(child.document.querySelector('[data-node-id="orchestrator"]').classList.contains('idle'), true)
+    await act(async () => mock.timers.tick(1))
+    assert.equal(child.document.querySelector('[data-node-id="orchestrator"]').classList.contains('active'), true)
     await act(async () => child.dispatchEvent(new child.Event('beforeunload')))
     assert.equal(child.document.querySelector('.workflow-monitor'), null)
     closed = false
@@ -126,6 +215,7 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     await act(async () => root.unmount())
     assert.equal(closed, true)
   } finally {
+    mock.timers.reset()
     window.close()
     for (const [key, descriptor] of descriptors) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor)

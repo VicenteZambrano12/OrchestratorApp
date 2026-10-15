@@ -164,6 +164,13 @@ function MainView({ user, onSwitchUser }) {
     ])
   }
 
+  function receiveApiResponse(data, endpoint) {
+    setTrace((current) => ({
+      ...current, response: data,
+      responses: [...(current.responses ?? []), { endpoint, data }],
+    }))
+  }
+
   function sendMessage(event) {
     event.preventDefault()
     if (!input.trim() || pending) return
@@ -188,7 +195,7 @@ function MainView({ user, onSwitchUser }) {
       const result = await requestChat(query, sessionId, controller.signal, language, user.id, (steps) => {
         setPendingSteps(steps)
         setTrace((current) => ({ ...current, steps }))
-      }, (response) => setTrace((current) => ({ ...current, response })))
+      }, receiveApiResponse)
       if (controller.signal.aborted) return
       setTrace((current) => ({ ...current, status: 'complete' }))
       receiveResponse(result)
@@ -241,9 +248,9 @@ function MainView({ user, onSwitchUser }) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const result = await requestRoutineSave(sessionId, message.routine, message.draftId, controller.signal, language, user.id)
+      const result = await requestRoutineSave(sessionId, message.routine, message.draftId, controller.signal, language, user.id, receiveApiResponse)
       if (controller.signal.aborted) return
-      setTrace((current) => ({ ...current, status: 'complete', response: result }))
+      setTrace((current) => ({ ...current, status: 'complete' }))
       receiveResponse(result)
     } catch (requestError) {
       if (!controller.signal.aborted) setTrace((current) => ({ ...current, status: 'failed', error: requestError.message }))

@@ -17,6 +17,11 @@ description: |
   `POST /{id}/chat` also supports `Accept: application/x-ndjson` for live
   workflow progress. Each newline-delimited event has a `type`: `progress`
   contains the executed node's `id` and short English localization key `label`;
+  SQL progress events additionally contain `kind: sql`, the executing stage's
+  `parent`, the parameterized statement template in `sql`, and the provider plus
+  database file name in `source`. SQL events omit bound values, rows, and absolute
+  database paths. They cover the history SQL client, exercise catalog, and routine
+  repository during streamed chat execution.
   `heartbeat` keeps the connection alive; terminal `result` contains the existing
   response envelope in `data`. Terminal `error` contains `status` (422 or 500)
   and an optional input-error `message`. Processing errors after streaming starts
