@@ -99,6 +99,50 @@ async function changeSets(value) {
   })
 }
 
+test('legacy templates load with unknown timing and log against the selected original routine', async (context) => {
+  const legacy = {
+    ...structuredClone(plan),
+    storage_format: 'legacy',
+    days: [9, 11].map((routineId, index) => ({
+      ...structuredClone(plan.days[0]),
+      day: index + 1, routine_id: routineId, duration_minutes: null,
+      day_type: index === 0 ? 'Legacy push' : 'Legacy legs',
+      exercises: [{ ...plan.days[0].exercises[0], rest_seconds: null }],
+    })),
+  }
+  const posts = []
+  context.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.endsWith('/routine')) {
+      assert.notEqual(options.method, 'PUT')
+      return routineResponse(legacy, 11)
+    }
+    assert.equal(url, '/api/users/7/workouts')
+    const payload = JSON.parse(options.body)
+    posts.push(payload)
+    return Response.json({
+      training_id: `legacy-${posts.length}`, user_id: 7, routine_id: payload.routine_id,
+      date: '2026-10-15', created_at: '2026-10-15T15:00:00Z', sets_saved: payload.sets.length,
+    })
+  })
+  await click('My Routine')
+  assert.equal(document.querySelector('[role="alert"]'), null)
+  assert.match(document.querySelector('.routine-badges').textContent, /Unknown/)
+  assert.match(document.querySelector('.exercise-name small').textContent, /Unknown/)
+  assert.equal(button('Edit workout').disabled, true)
+  assert.match(document.querySelector('.routine-view').textContent, /create a new plan to edit/)
+  for (const [index, routineId] of [9, 11].entries()) {
+    await act(async () => document.querySelectorAll('[role="tab"]')[index].click())
+    await click('Start Workout')
+    await changeInput('Bench Press set 1 reps', '8')
+    await act(async () => document.querySelector('[aria-label="Mark Bench Press complete"]').click())
+    assert.equal(document.querySelector('[aria-label="Rest countdown"]'), null)
+    assert.equal(document.querySelector('[role="alert"]'), null)
+    await click('Finish workout')
+    await click('Yes, finish and save', document.querySelector('dialog[open]'))
+    assert.equal(posts.at(-1).routine_id, routineId)
+  }
+})
+
 test('Done editing asks before PUT; cancel preserves edits; confirmation saves exactly once', async (context) => {
   let currentPlan = structuredClone(plan)
   let finishSave
@@ -366,7 +410,14 @@ test('suggested additions retain catalog IDs and custom swaps cannot save under 
   })
 
   test('active day and timer survive visiting chat and reopening My Routine without reloading the plan', async (context) => {
-    const fetch = context.mock.method(globalThis, 'fetch', async () => routineResponse(twoDayPlan()))
+    const fetch = context.mock.method(globalThis, 'fetch', async (url) => {
+      if (url.endsWith('/days')) return Response.json(
+        Array.from({ length: 7 }, (_, index) => ({
+          date: `2026-10-${11 + index}`, day_of_week: '', has_routine: false,
+        })),
+      )
+      return routineResponse(twoDayPlan())
+    })
     await click('My Routine')
     await act(async () => document.querySelectorAll('[role="tab"]')[1].click())
     await click('Start Workout')
@@ -385,7 +436,8 @@ test('suggested additions retain catalog IDs and custom swaps cannot save under 
     assert.equal(document.querySelector('[aria-label="Row set 1 reps"]').value, '12')
     assert.equal(document.querySelector('[aria-label="Row set 1 weight"]').value, '25.5')
     assert.equal(document.querySelector('[aria-label="Row set 2 reps"]').value, '9')
-    assert.equal(fetch.mock.callCount(), 1)
+    assert.equal(fetch.mock.calls.filter(({ arguments: [url] }) => url.endsWith('/routine')).length, 1)
+    assert.equal(fetch.mock.calls.filter(({ arguments: [url] }) => url.endsWith('/days')).length, 1)
   })
 
 test('missing routine identity is an explicit load error rather than saving against a guessed ID', async (context) => {

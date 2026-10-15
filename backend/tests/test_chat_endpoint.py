@@ -9,6 +9,7 @@ from systems.pipeline.Pipeline import Pipeline
 from utils.pipeline.dataclass.models import PipelineResult
 from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation
+from utils.past_routines_analyzer.dataclass.models import PastRoutinesAnalysis
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from utils.general.GeminiApiCall import GeminiClient
 from systems.routinemaker.RoutineMaker import RoutineMaker
@@ -195,6 +196,38 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(result["response"], [exercise.model_dump()])
+
+    async def test_returns_past_routines_analysis_object(self):
+        analysis = PastRoutinesAnalysis(
+            route="compare_last_two_workouts", day_type="pull",
+            data=[{"training_rank": 1, "exercise_name": "Pull-Up", "reps": 10, "weight": 0.0}],
+            llm_explain="Your pull-ups improved by two reps.",
+        )
+        self.pipeline.handle_with_subsystem.return_value = PipelineResult(
+            subsystem="past_routines_analyzer", response=analysis,
+        )
+        status, result = await self.request(
+            "POST", self.chat_path,
+            {"query": "Compare my last pull days", "language": "EN", "user_id": 2},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {
+            "subsystem": "past_routines_analyzer", "response": analysis.model_dump(),
+        })
+
+    async def test_past_routine_request_without_user_returns_422(self):
+        orchestrator = Mock(spec=Orchestrator)
+        orchestrator.route.return_value = "past_routines_analyzer"
+        workflow = Mock()
+        app.dependency_overrides[get_pipeline] = lambda: Pipeline(
+            orchestrator, past_routines_analyzer=workflow,
+        )
+        status, result = await self.request(
+            "POST", self.chat_path, {"query": "Show my last push day", "language": "EN"}
+        )
+        self.assertEqual(status, 422)
+        self.assertIn("user_id", json.dumps(result))
+        workflow.handle.assert_not_called()
 
     async def test_routine_parameters_preview_and_confirmation_survive_http_requests(self):
         fixture = routine_fixtures.RoutineMakerTests()

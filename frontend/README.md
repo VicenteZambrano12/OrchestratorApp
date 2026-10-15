@@ -2,8 +2,17 @@
 
 A responsive React + Vite mockup for OrchestratorApp, with two views:
 
-- **AI Chat:** example conversation, safe Markdown responses, expandable pipeline
-  summaries, suggested prompts, and an optional live API connection.
+- **AI Chat:** safe Markdown responses, always-visible live workflow steps,
+  suggested prompts, and a live API connection. Each executed node adds one short
+  phrase to the timeline; no expansion or simulated progress timers are used.
+  The chat requests `Accept: application/x-ndjson` from `POST /{id}/chat`, receives
+  `progress` events followed by a `result` (the existing JSON response envelope)
+  or an explicit `error`, and keeps the steps with the answer. Heartbeats keep
+  long-running requests alive. English and Spanish labels follow the UI language.
+  Older JSON-only servers still return answers, without invented node steps.
+  The three suggested prompts cover the integrated subsystems: creating a
+  muscle-building routine, explaining exercise technique, and analyzing saved
+  workouts from the last seven days. Prompts follow the selected UI language.
 - **My Routine:** loads the selected user's active saved plan through
   `GET /users/{userId}/routine` and uses the original workout view, not the chat
   routine card. It shows the saved days, exercises, sets, rep targets, rest, notes,
@@ -13,7 +22,51 @@ A responsive React + Vite mockup for OrchestratorApp, with two views:
   Loading, errors, retry, and
   profiles without an active routine have explicit states.
 
+### Live system map
+
+Use **Live system map** in the header to open a separate, resizable browser window.
+Move it independently (including to another display) while using chat. It stays
+connected to the latest request, including when opened midway through a response.
+Executed routes glow, the current node animates, unused subsystem branches remain
+muted, and failures mark the interrupted node. Zoom controls and scrollbars support
+larger diagrams; selecting a query reveals its SQL template and database source.
+The map resets for each request or new conversation, closes when switching users,
+and follows the application's theme and language. Allow pop-ups for this site if
+the browser blocks the window.
+
+SQL events cover chat's history SQL client, exercise catalog, and routine repository.
+Parameters, rows, absolute database paths, and private model reasoning are not
+exposed. Database source nodes identify the actual SQLite file used, not a guessed
+source. A direct routine-save button shows its save stage but does not invent SQL
+events for the separate, non-streaming save endpoint. JSON-only servers explicitly
+show that execution events are unavailable.
+
 ### Workout controls
+
+The **A little stronger. Every single week.** card loads the selected user's
+active plan from `GET /users/{userId}/routine`. Weekly frequency is the number
+of planned days; **Max session duration** is the longest planned session in minutes,
+matching the backend's routine timing convention. For legacy templates without
+saved timing, the card shows **Estimated max session**, calculated only from
+planned sets: 5 minutes of warm-up, 45 seconds per working set, 90 seconds of
+rest between sets, and 1 minute between exercises, rounded up to whole minutes.
+The card uses the longest estimated day, and its tooltip explains these assumptions.
+Recorded workout times and activity history never affect planned or estimated
+duration. The estimate does not modify the saved routine or its timing.
+Loading, missing routines, and retryable
+errors are explicit. Saving a new routine in chat refreshes these stats.
+
+**Your weekly rhythm** loads `GET /users/{userId}/days` for the selected user.
+It displays the last seven UTC dates in chronological order, ending with today
+(Sunday through Saturday when today is Saturday). Markers reflect logged
+workouts, not scheduled template days or unsaved exercise checkboxes. The count
+shows training days logged. Weekday labels follow the selected English/Spanish
+language. Loading and retryable errors are explicit; returning to AI Chat after
+a workout reloads the history.
+
+Run `node --test src/components/TrainingPanel/weekly-rhythm.test.js` to check
+routine day counts, maximum durations, refresh after saving, legacy plans,
+history ordering, markers, localization, loading, errors, and user isolation.
 
 Routine details appear as compact badges, and each day card shows its completion
 count. Before starting, sets, rep targets, and weights are editable; a zero working

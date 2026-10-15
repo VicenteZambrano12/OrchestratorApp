@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation, _ExerciseDecision
 from utils.exercise_explainer.func.catalog import ExerciseCatalog
+from utils.pipeline.progress import report_progress
 
 
 def handle(
@@ -28,6 +29,7 @@ def handle(
         return decision.message.strip()
     if decision.message.strip():
         raise ValueError("named exercises requires an empty message")
+    report_progress("exercise_catalog", "Searching the exercise catalog")
     exercises, unresolved = (catalog or ExerciseCatalog()).resolve(decision.exercises)
     if unresolved:
         prefix = (
@@ -37,9 +39,10 @@ def handle(
         )
         return prefix + "; ".join(unresolved)
     results: list[ExerciseExplanation] = []
-    for exercise in exercises:
+    for index, exercise in enumerate(exercises):
         # Validate catalog values before sending context to the provider.
         validated = ExerciseExplanation(**exercise, llm_explanation="pending")
+        report_progress(f"exercise_explanation_{index}", "Preparing an exercise explanation")
         explanation = generate_response("explanation", {**payload, "exercise": exercise})
         if not isinstance(explanation, str) or not explanation.strip():
             raise ValueError("Gemini returned an empty or non-text explanation response")

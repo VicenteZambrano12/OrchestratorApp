@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown'
 import ExplainerCard from '../../../components/ExplainerCard/ExplainerCard'
 import SavedRoutine from '../../../components/SavedRoutine/SavedRoutine'
 import RoutineMaker from '../../../components/RoutineMaker/RoutineMaker'
+import PastRoutinesReport from '../../../components/PastRoutinesReport/PastRoutinesReport'
 
 function MarkdownResponse({ content }) {
   return <div className="markdown-response"><ReactMarkdown>{content}</ReactMarkdown></div>
@@ -18,7 +19,10 @@ const subsystemRenderers = {
   no_system: MarkdownResponse,
 }
 
-export function SubsystemResponse({ subsystem, content, savedRoutine, routine, onExplainExercise }) {
+export function SubsystemResponse({ subsystem, content, savedRoutine, routine, analysis, onExplainExercise }) {
+  if (subsystem === 'past_routines_analyzer' && analysis) {
+    return <PastRoutinesReport analysis={analysis} />
+  }
   if (subsystem === 'routine_maker' && savedRoutine) {
     return <SavedRoutine routine={savedRoutine} message={content} />
   }

@@ -102,6 +102,27 @@ class RoutineDay(BaseModel):
     exercises: list[RoutineExercise] = Field(min_length=1)
 
 
+class LegacyRoutineExercise(RoutineExercise):
+    rest_seconds: None = None
+
+
+class LegacyRoutineDay(RoutineDay):
+    day: int = Field(strict=True, ge=1)
+    routine_id: int = Field(strict=True, gt=0)
+    duration_minutes: None = None
+    exercises: list[LegacyRoutineExercise] = Field(min_length=1)
+
+
+class LegacyRoutinePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    storage_format: Literal["legacy"] = "legacy"
+    name: str
+    summary: str
+    recovery: str
+    days: list[LegacyRoutineDay] = Field(min_length=1)
+
+
 class RoutinePlan(BaseModel):
     """A weekly routine containing only catalog exercise references."""
 

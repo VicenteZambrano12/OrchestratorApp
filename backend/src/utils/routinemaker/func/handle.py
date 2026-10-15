@@ -9,6 +9,7 @@ from utils.routinemaker.dataclass.models import (
     RoutineState, _RoutingDecision,
 )
 from utils.routinemaker.func.repository import RoutineInputError, RoutineRepository
+from utils.pipeline.progress import report_progress
 
 
 class RoutineStore(Protocol):
@@ -60,6 +61,7 @@ def save_draft(
             state.routine, draft_id=state.draft_id,
         )
     if not already_saved:
+        report_progress("routine_save", "Saving your confirmed routine")
         state.saved_routine_id = repository.save(
             user_id, state.routine, state.parameters, state.draft_id, state.source_routine_id,
         )
@@ -94,6 +96,7 @@ def handle(
         raise RoutineInputError("language must be EN or ES")
     if not isinstance(session_id, str) or not session_id.strip():
         raise RoutineInputError("Routine requests require a session_id.")
+    report_progress("routine_context", "Loading your routine and exercise data")
     repository.validate_user(user_id)
     cached = state_store.get_routine_state(session_id, user_id)
     state = RoutineState.model_validate_json(cached) if cached else RoutineState()
@@ -106,6 +109,7 @@ def handle(
         "saved_routines": repository.routines(user_id),
         "exercises": repository.catalog(state.parameters),
     }
+    report_progress("routine_routing", "Choosing the next routine action")
     for attempt in range(3):
         response = generate_response("routing", payload)
         try:
@@ -249,6 +253,7 @@ def handle(
             ))
 
     stage = "routine_maker" if state.workflow == "create" else "routine_updater"
+    report_progress("routine_build" if stage == "routine_maker" else stage, "Building your routine preview" if stage == "routine_maker" else "Updating your routine preview")
     for attempt in range(3):
         response = generate_response(stage, payload)
         try:

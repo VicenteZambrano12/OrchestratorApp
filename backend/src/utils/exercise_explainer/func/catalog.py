@@ -5,6 +5,7 @@ import unicodedata
 from contextlib import closing
 from difflib import SequenceMatcher
 from pathlib import Path
+from sql.progress import ProgressConnection
 
 
 DEFAULT_DATABASE = Path(__file__).resolve().parents[5] / "database/gym_app.db"
@@ -37,7 +38,10 @@ class ExerciseCatalog:
 
     def resolve(self, names: list[str]) -> tuple[list[dict[str, object]], list[str]]:
         """Resolve every name before fetching full rows; never guess ambiguous variants."""
-        with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        with closing(sqlite3.connect(
+            self.path.resolve().as_uri() + "?mode=ro", uri=True, factory=ProgressConnection,
+        )) as db:
+            db.progress_source = self.path.name
             db.row_factory = sqlite3.Row
             catalog = db.execute("SELECT id, name FROM dim_exercises ORDER BY id").fetchall()
             ids: list[int] = []

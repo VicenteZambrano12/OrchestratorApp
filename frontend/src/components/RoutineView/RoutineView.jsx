@@ -83,7 +83,7 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     const next = toggleExerciseCompletion(routine, dayIndex, index)
     setRoutine(next)
     if (!validation) onSave?.(next)
-    if (session.isWorkoutActive && next.days[dayIndex].exercises[index].completed) session.startRest(index, day.exercises[index].rest)
+    if (session.isWorkoutActive && next.days[dayIndex].exercises[index].completed && day.exercises[index].rest !== null) session.startRest(index, day.exercises[index].rest)
     else if (session.restIndex === index) session.skipRest()
   }
 
@@ -127,18 +127,19 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     <div className="section-heading"><div><span className="eyebrow">{t('YOUR PERSONAL PLAYBOOK')}</span><h1>{routine.name || t('A plan for your potential')}<span>.</span></h1><p>{routine.summary || t("Show up for yourself. We'll handle the next step.")}</p>
       <div className="routine-badges">
         <span><Dumbbell size={13} /><span className="sr-only">{t('Training split')}: </span>{routine.name ? [...new Set(routine.days.map((item) => item.name))].join(' / ') : t('Push / Pull / Legs')}</span>
-        <span><Clock3 size={13} /><span className="sr-only">{t('Session length')}: </span>{day.durationMinutes ? `${day.durationMinutes} ${t('min')}` : t('60 minutes')}</span>
+        <span><Clock3 size={13} /><span className="sr-only">{t('Session length')}: </span>{day.durationMinutes === null ? t('Unknown') : day.durationMinutes ? `${day.durationMinutes} ${t('min')}` : t('60 minutes')}</span>
         <span><Target size={13} />{t('trainingDayCount', { count: routine.days.length })}</span>
         {!routine.name && <span>{t('Demo workout')}</span>}
       </div>
     </div><span className="plan-badge"><span className="status-dot" />{t('Active plan')}</span></div>
+    {routine.storageFormat === 'legacy' && <p role="status">{t('Legacy workout templates: timing is unknown. You can log workouts; create a new plan to edit timing and structure.')}</p>}
     <div className="day-tabs" role="tablist" aria-label={t('Workout days')}>{routine.days.map((item, index) => <button key={index} id={`day-tab-${index}`} role="tab" aria-selected={index === dayIndex} aria-controls="day-panel" disabled={session.isWorkoutActive && index !== dayIndex} tabIndex={index === dayIndex ? 0 : -1} onKeyDown={(event) => onTabKey(event, index)} onClick={() => selectDay(index)}>
       <span className="day-tab-top"><span>{t('DAY')} {String(index + 1).padStart(2, '0')}</span><span className="day-completion">{t('dayCompletion', { completed: item.exercises.filter((exercise) => exercise.completed).length, total: item.exercises.length })}</span></span>
       <strong>{t(item.name)}</strong><small className="line-clamp-1" title={t(item.focus)}>{t(item.focus)}</small>
     </button>)}</div>
     <section className="workout-card" id="day-panel" role="tabpanel" aria-labelledby={`day-tab-${dayIndex}`}>
       <div className="workout-heading"><div><span className="eyebrow">{t('DAY')} {dayIndex + 1}, {t("LET'S DO THIS")}</span><h2>{t('workoutDay', { day: t(day.name) })} <span>{t('exercises', { count: day.exercises.length })}</span></h2></div>
-        <div className="button-group workout-actions"><button ref={editButtonRef} className={`secondary-button ${isEditing ? 'done-editing' : ''}`} aria-pressed={isEditing} disabled={session.isWorkoutActive} onClick={finishEditing}>{isEditing && <Check size={15} />}{t(isEditing ? 'Done editing' : 'Edit workout')}</button>
+        <div className="button-group workout-actions"><button ref={editButtonRef} className={`secondary-button ${isEditing ? 'done-editing' : ''}`} aria-pressed={isEditing} disabled={session.isWorkoutActive || routine.storageFormat === 'legacy'} onClick={finishEditing}>{isEditing && <Check size={15} />}{t(isEditing ? 'Done editing' : 'Edit workout')}</button>
           <button ref={workoutButtonRef} className="start-workout" disabled={Boolean(validation || workoutValidation) || (!session.isWorkoutActive && (isEditing || day.exercises.length === 0 || !onFinishWorkout))} onClick={session.isWorkoutActive ? () => setConfirmFinish(true) : startWorkout}>{session.isWorkoutActive ? <Square size={15} /> : <Play size={15} fill="currentColor" />}{t(session.isWorkoutActive ? 'Finish workout' : 'Start Workout')}</button>
         </div>
       </div>
@@ -158,7 +159,7 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
               onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); const target = index + (event.key === 'ArrowUp' ? -1 : 1); reorder(index, target); requestAnimationFrame(() => document.querySelectorAll('.exercise-grip')[Math.max(0, Math.min(day.exercises.length - 1, target))]?.focus()) } }}>
               <GripVertical size={17} />
             </button>}
-            <span className="exercise-number">{String(index + 1).padStart(2, '0')}</span><span><strong>{t(exercise.name)}</strong><small>{exercise.muscle && <>{t(exercise.muscle)} · </>}{t('restDuration', { duration: t(exercise.rest) })}</small>{exercise.notes && <small>{exercise.notes}</small>}</span>
+            <span className="exercise-number">{String(index + 1).padStart(2, '0')}</span><span><strong>{t(exercise.name)}</strong><small>{exercise.muscle && <>{t(exercise.muscle)} · </>}{t('restDuration', { duration: exercise.rest === null ? t('Unknown') : t(exercise.rest) })}</small>{exercise.notes && <small>{exercise.notes}</small>}</span>
           </div>
           {['sets', 'reps', 'weight'].map((field) => <span key={field}>{session.isWorkoutActive ? exercise[field] : <ExerciseValueInput exercise={exercise} field={field} weightUnit={weightUnit} onChange={(value) => changeExercise(index, field, value)} />}</span>)}
           <button className={`completion-button ${exercise.completed ? 'checked' : ''}`} role="checkbox" aria-label={t(exercise.completed ? 'Mark {{exercise}} incomplete' : 'Mark {{exercise}} complete', { exercise: t(exercise.name) })} aria-checked={exercise.completed} onClick={() => completeExercise(index)}>{exercise.completed && <Check size={16} strokeWidth={3} />}</button>

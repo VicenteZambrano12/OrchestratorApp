@@ -1,10 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi.responses import StreamingResponse
 
 from api.DataClasses.pipeline.ChatRequest import ChatRequest
 from api.DataClasses.pipeline.ChatResponse import ChatResponse
 from api.DataClasses.pipeline.SaveRoutineRequest import SaveRoutineRequest
+from api.Endpoint.chat_progress import stream_chat
 from api.documentation import INTERNAL_SERVER_ERROR_RESPONSE, VALIDATION_ERROR_RESPONSE
 from api.redis_deps import SetTurn, get_n_turns, get_routine_store, get_set_turn
 from systems.pipeline.Pipeline import Pipeline
@@ -77,6 +79,9 @@ def save_routine(
     status_code=status.HTTP_200_OK,
     response_model=ChatResponse,
     responses={
+        200: {"content": {"application/x-ndjson": {
+            "schema": {"type": "string"},
+        }}, "description": "JSON answer, or live progress and a terminal result/error with Accept: application/x-ndjson."},
         422: VALIDATION_ERROR_RESPONSE,
         status.HTTP_500_INTERNAL_SERVER_ERROR: INTERNAL_SERVER_ERROR_RESPONSE,
     },
@@ -95,8 +100,17 @@ def chat(
     ],
     request: ChatRequest,
     pipeline: Annotated[Pipeline, Depends(get_pipeline)],
-) -> ChatResponse:
+    http_request: Request,
+) -> ChatResponse | StreamingResponse:
     """Route a question and execute the selected gym-assistance system.
+
+    Set `Accept: application/x-ndjson` to receive live `progress` events
+    (`id`, `label`), optional SQL progress metadata (`kind: sql`, `parent`,
+    `sql`: parameterized statement template, `source`: provider and file name),
+    optional `heartbeat` events, and a terminal `result`
+    (`data`: the ChatResponse envelope) or `error` (`status`, optional `message`).
+    Stream processing errors are in-band after HTTP 200; request validation
+    still uses HTTP 422. The default JSON response is unchanged.
 
     **Business rules:** `query` and `language` are both required; optional
     `user_id` and `client_saves_routine` are also accepted. Other fields are rejected. Queries cannot be blank.
@@ -110,7 +124,9 @@ def chat(
     Exercise explanations return a list of original database fields plus one
     generated llm_explanation per exercise. Missing, ambiguous, or unmatched
     exercise names return a text clarification request. Past-routine analysis
-    returns text. Routine Maker
+    requires `user_id` and returns `route` (past_day_exercise,
+    compare_last_two_workouts or weekly_performance), `day_type`, the user's
+    logged workout rows in `data`, and a generated `llm_explain`. Routine Maker
     returns a structured result and may ask for missing requirements rather than
     produce a routine. Unsupported questions return a localized no-match answer
     with HTTP 200, not an error. Every successful response includes `subsystem`,
@@ -138,12 +154,16 @@ def chat(
     provider, and processing failures propagate as HTTP 500; no successful
     fallback response is generated.
     """
-    try:
-        result = pipeline.handle_with_subsystem(
+    def run():
+        return pipeline.handle_with_subsystem(
             request.query, request.language, session_id=id,
             **({"user_id": request.user_id} if request.user_id is not None else {}),
             **({"client_saves_routine": True} if request.client_saves_routine else {}),
         )
+    if "application/x-ndjson" in http_request.headers.get("accept", ""):
+        return stream_chat(run)
+    try:
+        result = run()
     except RoutineInputError as error:
         raise HTTPException(status_code=422, detail=[{
             "loc": ["body", "user_id"], "msg": str(error), "type": "value_error",

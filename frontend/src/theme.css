@@ -161,13 +161,10 @@ h2, h3, h4 { color: var(--c-text); }
 .user .markdown-response { background: var(--bg-surface-muted); border-radius: 12px; padding: 14px 16px; color: var(--text-secondary); }
 
 /* Pipeline */
-.pipeline-toggle > span { color: var(--c-emerald-400); }
-.pipeline-toggle .pipeline-meta { color: var(--c-text-muted); }
-.pipeline-stages { border-top-color: var(--c-border-soft); }
-.stage-icon { background: var(--c-accent-soft); border-color: var(--c-border-accent-hover); color: var(--c-emerald-400); }
-.pipeline-stage strong { color: var(--c-text); }
-.pipeline-stage p, .pipeline-disclaimer { color: var(--c-text-faint); }
-.stage-check { color: var(--c-emerald-400); }
+.pipeline-stage, .pipeline-waiting { color: var(--c-text-muted); }
+.pipeline-stage.is-active { color: var(--c-text); }
+.pipeline-stage .stage-icon { color: var(--c-emerald-400); }
+.pipeline-stage:not(:last-child)::after { border-color: var(--c-border-soft); }
 
 /* Routine preview and actions */
 .routine-preview { gap: 14px; }

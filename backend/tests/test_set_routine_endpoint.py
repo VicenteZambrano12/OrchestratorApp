@@ -2,6 +2,7 @@ import json
 import sqlite3
 import unittest
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import Mock
 
 from api.Endpoint.active_routine import get_routine_repository
@@ -151,6 +152,100 @@ class SetRoutineEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual((status, loaded), (200, saved))
             self.assertEqual(int(get_headers[b"x-routine-id"]), routine_id)
+
+    async def test_get_active_routine_reports_invalid_json_plan_without_server_error(self):
+        saved = self.fixture.saved()
+        with sqlite3.connect(self.fixture.database) as db:
+            db.execute(
+                "UPDATE dim_routines SET description = ? WHERE id = ?",
+                ('{"routine": {}}', saved.routine_id),
+            )
+
+        status, body = await self.request("GET", "/users/1/routine")
+
+        self.assertEqual(status, 409)
+        self.assertIn("legacy or invalid data", body["detail"])
+
+    def seed_legacy_templates(self):
+        source = Path(__file__).resolve().parents[2] / "database/gym_app.db"
+        with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as db:
+            ddl = db.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'fact_workout_sets'"
+            ).fetchone()[0]
+        with sqlite3.connect(self.fixture.database) as db:
+            db.execute(ddl)
+            db.executemany(
+                "INSERT INTO dim_routines(id, user_id, name, description, is_active) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    (9, 2, "Push", "Pressing exercises.", 1),
+                    (10, 2, "Pull", "Pulling exercises.", 1),
+                    (11, 2, "Legs", "Leg exercises.", 1),
+                    (12, 2, "Empty draft", "Not yet populated.", 1),
+                    (13, 2, "Old template", "Inactive.", 0),
+                    (14, 1, "Other user", "Not user two.", 1),
+                ],
+            )
+            db.executemany(
+                "INSERT INTO fact_workout_sets "
+                "(user_id, routine_id, exercise_id, training_id, exercise_order, "
+                "set_number, reps, weight, duration_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (2, 9, 1, None, 1, 1, 8, 70, None),
+                    (2, 9, 1, None, 1, 2, 6, 75, None),
+                    (2, 10, 5, None, 1, 1, 10, None, 60),
+                    (2, 11, 3, None, 1, 1, 12, 90, None),
+                    (2, 12, 1, "historical-only", 1, 1, 10, 50, None),
+                    (2, 13, 1, None, 1, 1, 10, 50, None),
+                    (1, 14, 1, None, 1, 1, 10, 50, None),
+                    (1, 9, 1, None, 1, 3, 99, 999, None),
+                ],
+            )
+
+    async def test_loads_legacy_templates_and_excludes_empty_inactive_and_historical_rows(self):
+        self.seed_legacy_templates()
+        before = self.fixture.rows()
+        status, body, headers = await self.request(
+            "GET", "/users/2/routine", include_headers=True,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["storage_format"], "legacy")
+        self.assertEqual(headers[b"x-routine-id"], b"11")
+        self.assertEqual([day["routine_id"] for day in body["days"]], [9, 10, 11])
+        self.assertEqual([day["day"] for day in body["days"]], [1, 2, 3])
+        self.assertTrue(all(day["duration_minutes"] is None for day in body["days"]))
+        exercise = body["days"][0]["exercises"][0]
+        self.assertEqual(exercise["sets"], 2)
+        self.assertEqual(exercise["reps"], "8 / 6")
+        self.assertEqual(exercise["name"], "Bench Press")
+        self.assertIsNone(exercise["rest_seconds"])
+        self.assertIn("weight=75.0", exercise["notes"])
+        self.assertIn("duration_seconds=60", body["days"][1]["exercises"][0]["notes"])
+        self.assertNotIn("999", exercise["notes"])
+        self.assertEqual(self.fixture.rows(), before)
+        self.assertEqual((await self.request("PUT", "/users/2/routine", body))[0], 422)
+        self.assertEqual(self.fixture.rows(), before)
+
+    async def test_legacy_empty_templates_return_null_without_version_header(self):
+        self.seed_legacy_templates()
+        with sqlite3.connect(self.fixture.database) as db:
+            db.execute("DELETE FROM fact_workout_sets WHERE training_id IS NULL")
+        status, body, headers = await self.request(
+            "GET", "/users/2/routine", include_headers=True,
+        )
+        self.assertEqual((status, body), (200, None))
+        self.assertNotIn(b"x-routine-id", headers)
+
+    async def test_new_json_save_replaces_legacy_read_without_changing_old_descriptions(self):
+        self.seed_legacy_templates()
+        before = self.fixture.rows()
+        status, saved = await self.request("PUT", "/users/2/routine", test_routine_maker.plan())
+        self.assertEqual(status, 200)
+        self.assertEqual(await self.request("GET", "/users/2/routine"), (200, saved))
+        self.assertEqual(
+            [row[:4] for row in self.fixture.rows()[:-1]],
+            [row[:4] for row in before],
+        )
 
     async def test_replaces_only_selected_users_active_routines(self):
         original = self.fixture.saved()

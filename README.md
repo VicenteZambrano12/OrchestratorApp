@@ -39,6 +39,63 @@ Neither endpoint requires authentication. Provider credentials are configured
 on the server and must not be included in client requests. `/health` is a liveness
 check only: it does not validate provider readiness.
 
+## SQL client
+
+The reusable synchronous client lives in `backend/src/sql/SQLClient.py`.
+Add these settings to the repository-root `.env` (also shown in `.env.example`):
+
+```dotenv
+SQL_DATABASE_TYPE=sqlite
+SQLITE_DATABASE_PATH=database/gym_app.db
+```
+
+Explicit constructor arguments override process environment variables, which
+override `.env`, followed by the defaults above. Relative SQLite paths resolve
+from the repository root, independently of the working directory. File databases
+must already exist to avoid silently creating an empty database for a mistyped
+path; `:memory:` is supported for temporary databases. Foreign keys are enabled.
+
+With `backend/src` on the Python import path:
+
+```python
+from sql.SQLClient import SQLClient
+
+with SQLClient() as db:
+    users = db.fetch_all(
+        "SELECT id, username FROM dim_users WHERE id = ?", (1,)
+    )
+    user = db.fetch_one(
+        "SELECT id, username FROM dim_users WHERE username = :name",
+        {"name": "Jamie Davis"},
+    )
+```
+
+`execute(query, parameters)` and `executemany(query, parameter_sets)` return
+affected row counts (`-1` when unknown). `fetch_one` returns a dictionary or
+`None`; `fetch_all` returns a list of dictionaries. Use unique column names or
+aliases when selecting joined tables. Bind values through parameters rather
+than formatting them into SQL; SQL syntax and placeholders remain
+provider-specific.
+
+A context manager connects, commits on success, rolls back on an exception, and
+always closes. For manual lifecycle management, call `connect()`, then
+`commit()` or `rollback()`, and finally `close()`. Closing without committing
+discards pending writes. Use a separate client per request/thread and do not
+nest context managers on the same client. Database and configuration errors
+propagate to the caller.
+
+Only SQLite is implemented. Other `SQL_DATABASE_TYPE` values fail explicitly.
+Future providers can add a connection factory using the client's DB-API
+connection/cursor protocols without changing its query methods. Existing
+domain repositories remain SQLite-specific; this adds a reusable client rather
+than migrating their SQL dialects or persistence logic.
+
+Run the client tests without touching the application database:
+
+```bash
+PYTHONPATH=backend/src:backend/tests uv run --project backend --locked python -m unittest test_sql_client -v
+```
+
 ## Gemini connectivity diagnostic
 
 To isolate provider failures from routing and chat processing, make one harmless
@@ -63,6 +120,27 @@ routing decisions. This prevents Markdown code fences around JSON; existing
 Pydantic validation still checks the content and rejects invalid decisions.
 
 ## User endpoints
+
+`GET /users/{user_id}/days` returns exactly seven days, oldest first, including
+today and the previous six days in UTC:
+
+```json
+[
+  {"date": "2026-10-09", "day_of_week": "Friday", "has_routine": false},
+  {"date": "2026-10-10", "day_of_week": "Saturday", "has_routine": true},
+  {"date": "2026-10-11", "day_of_week": "Sunday", "has_routine": false},
+  {"date": "2026-10-12", "day_of_week": "Monday", "has_routine": false},
+  {"date": "2026-10-13", "day_of_week": "Tuesday", "has_routine": false},
+  {"date": "2026-10-14", "day_of_week": "Wednesday", "has_routine": true},
+  {"date": "2026-10-15", "day_of_week": "Thursday", "has_routine": false}
+]
+```
+
+`has_routine` means the URL user logged a workout that day, not merely saved a
+routine plan. Template sets (`training_id IS NULL`) are excluded. Multiple sets
+or sessions on one day still produce one entry. Users without workouts receive
+seven false flags. Unknown users return 404; invalid user IDs return 422.
+This endpoint is read-only and does not require AI calls.
 
 User endpoints each have their own router module in `backend/src/api/Endpoint/`:
 `users.py` handles `GET /users`, `register_user.py` handles `POST /users`, and

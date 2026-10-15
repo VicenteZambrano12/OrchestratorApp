@@ -14,11 +14,26 @@ description: |
   `past_routines_analyzer`, or `no_system`. Questions outside the supported
   domains receive a localized no-match answer with `subsystem: no_system` and
   HTTP 200. Routing runs once per request.
+  `POST /{id}/chat` also supports `Accept: application/x-ndjson` for live
+  workflow progress. Each newline-delimited event has a `type`: `progress`
+  contains the executed node's `id` and short English localization key `label`;
+  `heartbeat` keeps the connection alive; terminal `result` contains the existing
+  response envelope in `data`. Terminal `error` contains `status` (422 or 500)
+  and an optional input-error `message`. Processing errors after streaming starts
+  are in-band with HTTP 200; request validation still returns HTTP 422.
+  The default JSON response and routing behavior remain unchanged. Steps describe
+  actual workflow actions, not model chain-of-thought. Disconnecting stops
+  delivery but cannot cancel an already-running synchronous provider call.
   Exercise lists preserve catalog values (id, name, description, instructions,
   icon_url, anatomy_diagram_url, and two decoded media_urls) and add a localized
   llm_explanation generated separately for each exercise. Missing or ambiguous
   exercise names return text asking for clarification. Catalog images are served
   at `/database/images/`; returned paths are not rewritten.
+  Past-routine analysis requires an existing numeric `user_id`. A second Gemini
+  router selects `past_day_exercise`, `compare_last_two_workouts` or
+  `weekly_performance` plus an optional `day_type` (for example push or pull),
+  reads the user's logged sets from SQLite, and returns them unchanged in `data`
+  with a generated `llm_explain`.
   Routine Maker additionally requires an existing numeric `user_id`. It classifies
   new routines, saved-routine edits, draft edits, and save confirmations before
   collecting missing requirements. Its `routine` contains a list of training days
@@ -30,6 +45,13 @@ description: |
   below. Invalid model output is validated with up to three attempts.
   `GET /users/{user_id}/routine` returns the active saved routine for an existing
   user, or `null` when the user has no active routine. An unknown user returns 404.
+  Legacy plain-text active routines are read from their template workout sets
+  (`training_id IS NULL`) and combined as training days, excluding empty drafts.
+  These responses include `storage_format: legacy`, null session/rest timing,
+  and each day's original `routine_id` for workout logging. They are read-only
+  plans in the UI; create a new complete plan to change their structure.
+  If all legacy templates are empty, GET returns null. Invalid saved JSON plans
+  still return 409. Existing JSON plan responses and PUT validation are unchanged.
   `PUT /users/{user_id}/routine` accepts that same complete routine JSON directly
   (without a wrapper) and returns the saved routine. It validates catalog exercise
   IDs and saves a new active version, atomically marking all previous versions for
@@ -58,6 +80,15 @@ description: |
   Unknown users return 404; invalid sets, unknown exercises, and routines not
   owned by the URL user return 422 without saving any sets. Each call creates
   a new session; active routines and other users' records remain unchanged.
+
+  `GET /users/{user_id}/days` returns a list of exactly seven UTC dates, oldest
+  first, covering today and the previous six days. Each entry contains `date`
+  (YYYY-MM-DD), `day_of_week` (full English weekday name), and `has_routine`.
+  `has_routine` is true only if the user has at least one logged workout on that
+  date (`training_id IS NOT NULL`); routine templates do not count. Days without
+  workouts are included with false, even when the user has no routines.
+  Unknown users return 404; non-positive or non-integer user IDs return 422.
+  This read-only endpoint does not call AI services.
 
   ## Authentication and permissions
 

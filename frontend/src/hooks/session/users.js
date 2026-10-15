@@ -1,4 +1,4 @@
-import { isRoutinePlan } from '../../features/RoutineMaker/routine-data/routineData'
+import { isRoutinePlan, isSavedRoutinePlan } from '../../features/RoutineMaker/routine-data/routineData'
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
@@ -18,6 +18,17 @@ export function listUsers(signal) {
   return userRequest({ signal })
 }
 
+export async function getUserDays(userId, signal) {
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    throw new Error('Weekly rhythm user ID must be a positive integer.')
+  }
+  const response = await fetch(`${baseUrl}/users/${userId}/days`, {
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000),
+  })
+  if (!response.ok) throw new Error(`Weekly rhythm API returned HTTP ${response.status}`)
+  return response.json()
+}
+
 async function routineRequest(userId, options, signal, query = '', includeMetadata = false) {
   if (!Number.isSafeInteger(userId) || userId < 1) {
     throw new Error('Routine user ID must be a positive integer.')
@@ -33,7 +44,7 @@ async function routineRequest(userId, options, signal, query = '', includeMetada
     throw new Error(`Routine API returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
   }
   const routine = await response.json()
-  if (routine !== null && !isRoutinePlan(routine)) {
+  if (routine !== null && !isSavedRoutinePlan(routine)) {
     throw new Error('The routine API returned an invalid routine.')
   }
   if (includeMetadata) {

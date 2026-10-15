@@ -4,13 +4,14 @@ from unittest.mock import Mock, patch
 
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from systems.orch.Orchestrator import Orchestrator
-from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
+from systems.past_routines_analyzer.PastRoutinesWorkflow import PastRoutinesWorkflow
 from systems.pipeline.Pipeline import Pipeline
 from systems.routinemaker.RoutineMaker import RoutineMaker
 from utils.pipeline.dataclass.models import PipelineResult
 from utils.pipeline.func.handle_with_subsystem import handle_with_subsystem
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation
 from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters
+from utils.past_routines_analyzer.dataclass.models import PastRoutinesAnalysis
 from utils.routinemaker.dataclass.models import ROUTINE_PLAN_EXAMPLE, RoutinePlan
 from api.redis_deps import RedisClient, SetTurn, GetNTurns
 
@@ -20,7 +21,7 @@ class PipelineTests(unittest.TestCase):
         self.orchestrator = Mock(spec=Orchestrator)
         self.routine_maker = Mock(spec=RoutineMaker)
         self.exercise_explainer = Mock(spec=ExerciseExplainer)
-        self.past_routines_analyzer = Mock(spec=PastRoutinesAnalyzer)
+        self.past_routines_analyzer = Mock(spec=PastRoutinesWorkflow)
         self.systems = {
             "routine_maker": self.routine_maker,
             "exercise_explainer": self.exercise_explainer,
@@ -210,7 +211,7 @@ class PipelineTests(unittest.TestCase):
                     if target == "routine_maker":
                         kwargs.update(parameters=None, routine=None, session_id="session", user_id=1)
                     elif target == "past_routines_analyzer":
-                        kwargs["history"] = None
+                        kwargs["user_id"] = 1
                     system.handle.assert_called_once_with(query, **kwargs)
                     for other_target, dependency in self.systems.items():
                         if other_target != target:
@@ -238,12 +239,41 @@ class PipelineTests(unittest.TestCase):
             session_id="session", user_id=1,
         )
 
-    def test_passes_history_to_analyzer(self):
+    def test_passes_user_and_memory_to_past_routines_workflow(self):
         self.orchestrator.route.return_value = "past_routines_analyzer"
-        self.pipeline.handle("Analyze my progress", "ES", history="Squat: 3x8 at 60kg")
+        self.pipeline.handle("Show my last push day", "ES", user_id=2)
         self.past_routines_analyzer.handle.assert_called_once_with(
-            "Analyze my progress", history="Squat: 3x8 at 60kg", language="ES"
+            "Show my last push day", user_id=2, language="ES"
         )
+
+        store = RedisClient()
+        turns = SetTurn(store)
+        turns.set("session", "What did I do on Monday?", "Bench 3x8", "past_routines_analyzer")
+        analysis = PastRoutinesAnalysis(
+            route="past_day_exercise", day_type="push",
+            data=[{"exercise_name": "Bench Press", "reps": 8, "weight": 65.0}],
+            llm_explain="You benched 65 kg.",
+        )
+        self.past_routines_analyzer.handle.reset_mock()
+        self.past_routines_analyzer.handle.return_value = analysis
+        pipeline = Pipeline(
+            self.orchestrator, past_routines_analyzer=self.past_routines_analyzer,
+            turn_setter=turns, turn_getter=GetNTurns(store),
+        )
+        self.assertIs(pipeline.handle("And the previous one?", "EN", session_id="session", user_id=2), analysis)
+        memory = self.past_routines_analyzer.handle.call_args.kwargs["memory"]
+        self.assertEqual(memory[0]["user_query"], "What did I do on Monday?")
+        latest = list(GetNTurns(store).get("session", 1).values())[0]
+        self.assertEqual(
+            (latest["user_query"], latest["system_response"], latest["subsystem_chosen"]),
+            ("And the previous one?", "You benched 65 kg.", "past_routines_analyzer"),
+        )
+
+    def test_past_routine_requests_require_user_before_system_execution(self):
+        self.orchestrator.route.return_value = "past_routines_analyzer"
+        with self.assertRaisesRegex(ValueError, "require user_id"):
+            self.pipeline.handle("Show my last push day", session_id="session")
+        self.past_routines_analyzer.handle.assert_not_called()
 
     def test_no_system_returns_localized_message_without_creating_systems(self):
         for language in ("EN", "ES"):
@@ -255,7 +285,7 @@ class PipelineTests(unittest.TestCase):
                 ) as routine_maker, patch(
                     "utils.pipeline.func.handle_with_subsystem.ExerciseExplainer"
                 ) as explainer, patch(
-                    "utils.pipeline.func.handle_with_subsystem.PastRoutinesAnalyzer"
+                    "utils.pipeline.func.handle_with_subsystem.PastRoutinesWorkflow"
                 ) as analyzer:
                     self.assertEqual(
                         pipeline.handle("What is the capital of Japan?", language),
@@ -297,7 +327,7 @@ class PipelineTests(unittest.TestCase):
         for target, class_name in (
             ("routine_maker", "RoutineMaker"),
             ("exercise_explainer", "ExerciseExplainer"),
-            ("past_routines_analyzer", "PastRoutinesAnalyzer"),
+            ("past_routines_analyzer", "PastRoutinesWorkflow"),
         ):
             with self.subTest(target=target):
                 system = self.systems[target]

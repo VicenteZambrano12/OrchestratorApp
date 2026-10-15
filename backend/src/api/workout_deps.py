@@ -1,18 +1,43 @@
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException
 
-from api.DataClasses.Workout import WorkoutRequest, WorkoutResponse
+from api.DataClasses.Workout import WorkoutDay, WorkoutRequest, WorkoutResponse
 from utils.routinemaker.func.repository import DEFAULT_DATABASE
 
 
 class WorkoutRepository:
     def __init__(self, path: Path = DEFAULT_DATABASE):
         self.path = path
+
+    def days(self, user_id: int) -> list[WorkoutDay]:
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=6)
+        end = today + timedelta(days=1)
+        with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+            if db.execute("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)).fetchone() is None:
+                raise HTTPException(status_code=404, detail="The user does not exist.")
+            workout_dates = {
+                row[0] for row in db.execute(
+                    "SELECT DISTINCT date(created_at) FROM fact_workout_sets "
+                    "WHERE user_id = ? AND training_id IS NOT NULL "
+                    "AND date(created_at) >= ? AND date(created_at) < ?",
+                    (user_id, start.isoformat(), end.isoformat()),
+                )
+            }
+        weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        dates = [start + timedelta(days=offset) for offset in range(7)]
+        return [
+            WorkoutDay(
+                date=day, day_of_week=weekdays[day.weekday()],
+                has_routine=day.isoformat() in workout_dates,
+            )
+            for day in dates
+        ]
 
     def save(self, user_id: int, workout: WorkoutRequest) -> WorkoutResponse:
         with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True)) as db, db:

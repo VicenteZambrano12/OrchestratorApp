@@ -34,7 +34,7 @@ class ChatRequest(BaseModel):
     )
     user_id: int | None = Field(
         default=None, gt=0,
-        description="Existing database user ID. Required when routed to Routine Maker; not authentication.",
+        description="Existing database user ID. Required when routed to Routine Maker or Past Routines Analyzer; not authentication.",
         examples=[None, 1],
     )
     client_saves_routine: bool = Field(

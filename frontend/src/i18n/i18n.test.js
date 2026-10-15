@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { after, before, test, mock } from 'node:test'
-import { createElement } from 'react'
+import { act, createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { Window } from 'happy-dom'
 import { createServer } from 'vite'
 
 let server
@@ -18,6 +19,8 @@ let usersApi
 let routineData
 let workoutEditing
 let sessionTime
+let reportData
+let demoAnalysis
 const storage = new Map()
 const html = { lang: 'en' }
 const originals = ['document', 'localStorage'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
@@ -43,6 +46,8 @@ before(async () => {
   routineData = await server.ssrLoadModule('/src/features/RoutineMaker/routine-data/routineData.js')
   workoutEditing = await server.ssrLoadModule('/src/features/RoutineView/workout-editing/workoutEditing.jsx')
   sessionTime = await server.ssrLoadModule('/src/features/RoutineView/workout-session/sessionTime.jsx')
+  reportData = await server.ssrLoadModule('/src/features/PastRoutinesReport/report-data/reportData.js')
+  demoAnalysis = await server.ssrLoadModule('/src/features/PastRoutinesReport/report-data/demoAnalysis.js')
 })
 
 after(async () => {
@@ -83,6 +88,65 @@ test('Spanish browser locales select ES; saved preference takes priority and sur
   const language = mock.getter(navigator, 'language', () => 'fr-FR')
   assert.equal(getInitialLanguage(), 'en')
   language.mock.restore()
+})
+
+test('three subsystem suggestions populate localized questions and match the empty-chat shortcut', async () => {
+  const window = new Window({ url: 'http://localhost' })
+  const globals = {
+    window, document: window.document, IS_REACT_ACT_ENVIRONMENT: true,
+    requestAnimationFrame: window.requestAnimationFrame.bind(window),
+  }
+  const descriptors = Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
+  for (const [key, value] of Object.entries(globals)) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+  }
+  const fetch = mock.method(globalThis, 'fetch', async (url) => {
+    if (url.endsWith('/routine')) return Response.json(null)
+    if (url.endsWith('/days')) return Response.json([])
+    throw new Error(`Unexpected network request: ${url}`)
+  })
+  const { createRoot } = await import('react-dom/client')
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const questions = {
+    en: [
+      'Create a 3-day gym routine to build muscle for an intermediate lifter, with 1 hour per session.',
+      'Explain how to do a barbell deadlift, which muscles it works, and common mistakes to avoid.',
+      'Analyze my saved workouts from the last 7 days and summarize my consistency, training volume, and progress.',
+    ],
+    es: [
+      'Crea una rutina de gimnasio de 3 días para ganar masa muscular, de nivel intermedio y con 1 hora por sesión.',
+      'Explícame cómo hacer un peso muerto con barra, qué músculos trabaja y qué errores comunes debo evitar.',
+      'Analiza mis entrenamientos guardados de los últimos 7 días y resume mi constancia, volumen de entrenamiento y progreso.',
+    ],
+  }
+  try {
+    for (const language of ['en', 'es']) {
+      await act(async () => {
+        await translations.setLanguage(language)
+        root.render(createElement(ThemeContext.Provider, {
+          value: { theme: 'light', resolvedTheme: 'light', setTheme: () => {} },
+        }, createElement(MainView, { user: { id: 1, username: 'Jamie Davis' }, onSwitchUser: () => {} })))
+      })
+      const buttons = [...container.querySelectorAll('.suggestions button')]
+      assert.equal(buttons.length, 3)
+      for (const [index, button] of buttons.entries()) {
+        await act(async () => button.click())
+        assert.equal(container.querySelector('textarea').value, questions[language][index])
+      }
+      await act(async () => container.querySelector('.empty-chat button').click())
+      assert.equal(container.querySelector('textarea').value, questions[language][0])
+    }
+  } finally {
+    await act(async () => root.unmount())
+    fetch.mock.restore()
+    window.close()
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
 })
 
 test('storage failure is surfaced while the in-memory language still changes', async () => {
@@ -320,6 +384,72 @@ test('routine JSON renders localized metadata, day tabs and exercise tables inst
   }
 })
 
+test('past routine analyses render the explanation with a route-specific visual report', async () => {
+  const cases = [
+    ['Show my last pull day', 'past_day_exercise', /class="set-list"/, { en: 'Exercise breakdown', es: 'Desglose por ejercicio' }],
+    ['Compare my last two push days', 'compare_last_two_workouts', /class="diverging-chart"/, { en: 'Strengths &amp; weaknesses', es: 'Fortalezas y debilidades' }],
+    ['How was my week?', 'weekly_performance', /class="radar-chart"/, { en: 'Heaviest lift of the week', es: 'Levantamiento más pesado de la semana' }],
+  ]
+  for (const language of ['en', 'es']) {
+    await translations.setLanguage(language)
+    for (const [query, route, chart, heading] of cases) {
+      const analysis = demoAnalysis.demoPastRoutinesAnalysis(query)
+      assert.equal(analysis.route, route)
+      const fetch = mock.method(globalThis, 'fetch', async (_url, options) => {
+        assert.deepEqual(JSON.parse(options.body), { query, language: language.toUpperCase(), user_id: 2, client_saves_routine: true })
+        return Response.json({ subsystem: 'past_routines_analyzer', response: analysis })
+      })
+      try {
+        const result = await chat.requestChat(query, 'session', new AbortController().signal, language.toUpperCase(), 2)
+        assert.equal(result.content, analysis.llm_explain)
+        assert.deepEqual(result.analysis, analysis)
+        const markup = renderToStaticMarkup(createElement(SubsystemResponse, { ...result, onExplainExercise: () => {} }))
+        assert.match(markup, /class="routines-report"/)
+        assert.match(markup, chart)
+        assert.ok(markup.includes(heading[language]), `${route} ${language}`)
+        assert.ok(markup.includes('demo data'))
+        assert.ok(!markup.includes('[object Object]') && !markup.includes('NaN'))
+      } finally {
+        fetch.mock.restore()
+      }
+    }
+  }
+  const empty = renderToStaticMarkup(createElement(SubsystemResponse, {
+    subsystem: 'past_routines_analyzer', content: 'Nothing yet.',
+    analysis: { route: 'weekly_performance', day_type: null, data: [], llm_explain: 'Nothing yet.' },
+  }))
+  assert.match(empty, /class="report-empty"/)
+})
+
+test('past routine responses are validated and comparison helpers find strengths and weaknesses', async () => {
+  for (const response of [
+    { route: 'unknown', day_type: null, data: [], llm_explain: 'Text' },
+    { route: 'weekly_performance', day_type: null, data: [], llm_explain: ' ' },
+    { route: 'past_day_exercise', day_type: 'push', data: [{ nested: {} }], llm_explain: 'Text' },
+    { route: 'past_day_exercise', day_type: 'push', data: null, llm_explain: 'Text' },
+  ]) {
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ subsystem: 'past_routines_analyzer', response }))
+    try {
+      await assert.rejects(chat.requestChat('History', 'session', new AbortController().signal, 'EN', 2), /invalid response/)
+    } finally {
+      fetch.mock.restore()
+    }
+  }
+  const row = (rank, name, reps, weight) => ({ training_rank: rank, exercise_name: name, exercise_order: 1, set_number: 1, reps, weight, primary_muscle: 'chest' })
+  const comparison = reportData.compareWorkouts([
+    row(1, 'Bench', 8, 80), row(2, 'Bench', 8, 70),
+    row(1, 'Dips', 8, 0), row(2, 'Dips', 10, 0),
+    row(1, 'Fly', 10, 20),
+  ])
+  assert.deepEqual(comparison.strengths.map((item) => item.name), ['Bench'])
+  assert.deepEqual(comparison.weaknesses.map((item) => item.name), ['Dips'])
+  assert.equal(comparison.weaknesses[0].change, -0.2)
+  assert.equal(comparison.exercises.find((item) => item.name === 'Fly').change, null)
+  assert.equal(comparison.latest.volume, 80 * 8 + 20 * 10)
+  assert.equal(reportData.estimatedOneRepMax({ reps: 1, weight: 100 }), 100)
+  assert.equal(reportData.estimatedOneRepMax({ reps: 10, weight: 0 }), 0)
+})
+
 test('routine JSON rejects malformed days, duplicate exercises and invalid targets', () => {
   const routine = {
     name: 'Push', recovery: 'Rest.', days: [{
@@ -344,6 +474,27 @@ test('routine JSON rejects malformed days, duplicate exercises and invalid targe
     update(invalid)
     assert.equal(routineData.isRoutinePlan(invalid), false)
   }
+})
+
+test('legacy routine timing stays unknown and cannot be saved as a complete plan', () => {
+  const legacy = {
+    storage_format: 'legacy', name: 'Saved templates', summary: '', recovery: 'Not recorded.',
+    days: [{
+      day: 1, routine_id: 9, day_type: 'Push', info: 'Pressing.', duration_minutes: null,
+      exercises: [{ exercise_id: 1, name: 'Press', sets: 2, reps: '8', rest_seconds: null, notes: '' }],
+    }],
+  }
+  assert.equal(routineData.isSavedRoutinePlan(legacy), true)
+  assert.equal(routineData.isRoutinePlan(legacy), false)
+  const workout = routineData.toWorkoutRoutine(legacy)
+  assert.equal(workout.storageFormat, 'legacy')
+  assert.equal(workout.days[0].routineId, 9)
+  assert.equal(workout.days[0].durationMinutes, null)
+  assert.equal(workout.days[0].exercises[0].rest, null)
+  assert.throws(() => routineData.toRoutinePlan(workout), /read-only/)
+  const invalid = structuredClone(legacy)
+  invalid.days[0].routine_id = null
+  assert.equal(routineData.isSavedRoutinePlan(invalid), false)
 })
 
 test('My Routine does not render device-only routine data as the saved plan', async () => {

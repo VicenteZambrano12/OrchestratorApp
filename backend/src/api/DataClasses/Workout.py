@@ -46,3 +46,9 @@ class WorkoutResponse(BaseModel):
     date: date
     created_at: datetime
     sets_saved: int
+
+
+class WorkoutDay(BaseModel):
+    date: date
+    day_of_week: str = Field(description="Full English weekday name.")
+    has_routine: bool = Field(description="Whether the user logged a workout on this UTC date.")

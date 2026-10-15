@@ -10,6 +10,7 @@ from api.Endpoint.active_routine import router as active_routine_router
 from api.Endpoint.set_routine import router as set_routine_router
 from api.Endpoint.register_user import router as register_user_router
 from api.Endpoint.workouts import router as workouts_router
+from api.Endpoint.get_user_days import router as get_user_days_router
 from api.documentation import load_app_documentation
 
 
@@ -22,6 +23,7 @@ app.include_router(active_routine_router)
 app.include_router(set_routine_router)
 app.include_router(register_user_router)
 app.include_router(workouts_router)
+app.include_router(get_user_days_router)
 app.mount(
     "/database/images",
     StaticFiles(directory=Path(__file__).resolve().parents[2] / "database/images"),

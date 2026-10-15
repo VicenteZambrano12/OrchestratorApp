@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING
 
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from systems.orch.Orchestrator import Orchestrator
-from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
+from systems.past_routines_analyzer.PastRoutinesWorkflow import PastRoutinesWorkflow
 from systems.routinemaker.RoutineMaker import RoutineMaker
 from utils.pipeline.dataclass.models import PipelineResult
+from utils.pipeline.progress import report_progress
 from utils.routinemaker.dataclass.models import RoutineParameters, RoutinePlan
 from utils.routinemaker.func.repository import RoutineInputError
 
@@ -20,7 +21,6 @@ def handle_with_subsystem(
     *,
     parameters: RoutineParameters | Mapping[str, object] | None = None,
     routine: RoutinePlan | None = None,
-    history: str | None = None,
     memory: list[dict[str, object]] | None = None,
     session_id: str | None = None,
     user_id: int | None = None,
@@ -32,6 +32,7 @@ def handle_with_subsystem(
     if language not in ("ES", "EN"):
         raise ValueError("language must be ES (Spanish) or EN (English)")
 
+    report_progress("orchestrator", "Analyzing your request")
     if pipeline._orchestrator is None:
         pipeline._orchestrator = Orchestrator.from_gemini()
     payload: dict[str, object] = {"query": query}
@@ -40,6 +41,7 @@ def handle_with_subsystem(
     target = pipeline._orchestrator.route(payload, language=language)
 
     if target == "no_system":
+        report_progress("general_guidance", "Preparing general guidance")
         return PipelineResult(
             subsystem="no_system",
             response=pipeline._orchestrator.no_system_message(language),
@@ -49,6 +51,7 @@ def handle_with_subsystem(
             raise RoutineInputError("Routine requests require user_id.")
         if session_id is None:
             raise RoutineInputError("Routine requests require session_id.")
+        report_progress("routine_maker", "Planning your routine request")
         if pipeline._routine_maker is None:
             pipeline._routine_maker = RoutineMaker()
         return PipelineResult(
@@ -60,6 +63,7 @@ def handle_with_subsystem(
             ),
         )
     if target == "exercise_explainer":
+        report_progress("exercise_explainer", "Identifying the exercises to explain")
         if pipeline._exercise_explainer is None:
             pipeline._exercise_explainer = ExerciseExplainer()
         return PipelineResult(
@@ -69,12 +73,16 @@ def handle_with_subsystem(
             ),
         )
     if target == "past_routines_analyzer":
+        if user_id is None:
+            raise RoutineInputError("Past routine requests require user_id.")
+        report_progress("past_routines_analyzer", "Choosing how to review your training history")
         if pipeline._past_routines_analyzer is None:
-            pipeline._past_routines_analyzer = PastRoutinesAnalyzer()
+            pipeline._past_routines_analyzer = PastRoutinesWorkflow()
         return PipelineResult(
             subsystem="past_routines_analyzer",
             response=pipeline._past_routines_analyzer.handle(
-                query, history=history, language=language
+                query, user_id=user_id, language=language,
+                **({"memory": memory} if memory else {}),
             ),
         )
     raise ValueError(f"unsupported pipeline subsystem id: {target}")

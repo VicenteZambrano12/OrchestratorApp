@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from utils.pipeline.dataclass.models import SubsystemId
 from utils.routinemaker.dataclass.models import ROUTINE_PLAN_EXAMPLE, RoutineMakerResult
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation
+from utils.past_routines_analyzer.dataclass.models import PastRoutinesAnalysis
 
 
 class ChatResponse(BaseModel):
@@ -32,13 +33,17 @@ class ChatResponse(BaseModel):
         ],
     )
 
-    response: str | RoutineMakerResult | list[ExerciseExplanation] = Field(
+    response: (
+        str | RoutineMakerResult | list[ExerciseExplanation] | PastRoutinesAnalysis
+    ) = Field(
         ...,
         description=(
             "Localized text answer, including no-match messages, or a structured "
             "Routine Maker result with status, parameters, message, and routine; "
             "or an exercise list containing original catalog fields and a separate "
-            "llm_explanation per exercise. Clarification requests remain text."
+            "llm_explanation per exercise; or a past-routine analysis with the "
+            "selected route, day_type, the user's logged database rows in data, "
+            "and the generated llm_explain. Clarification requests remain text."
         ),
         examples=[
             "Keep your heels grounded and your knees aligned with your toes.",
@@ -53,6 +58,17 @@ class ChatResponse(BaseModel):
                 "message": "Your draft is ready. Would you like to save it?",
                 "routine": ROUTINE_PLAN_EXAMPLE,
                 "routine_id": None,
+            },
+            {
+                "route": "past_day_exercise",
+                "day_type": "push",
+                "data": [{
+                    "training_date": "2026-10-12", "training_day": "Push Day A",
+                    "exercise_order": 1, "exercise_name": "Barbell Bench Press",
+                    "primary_muscle": "chest", "set_number": 1, "reps": 8,
+                    "weight": 65.0, "weight_unit": "kg", "rpe": 8.0,
+                }],
+                "llm_explain": "On your last push day you benched 65 kg for 8 reps.",
             },
         ],
     )

@@ -1,7 +1,10 @@
 import i18n from 'i18next'
 import { isExerciseList } from '../../ExplainerCard/exercise-data/exerciseData'
+import { isPastRoutinesAnalysis } from '../../PastRoutinesReport/report-data/reportData'
+import { demoPastRoutinesAnalysis } from '../../PastRoutinesReport/report-data/demoAnalysis'
 import { isRoutinePlan } from '../../RoutineMaker/routine-data/routineData'
 import { saveUserRoutine } from '../../../hooks/session/users'
+import { readChatStream } from './readChatStream'
 
 export const subsystemNames = {
   routine_maker: 'Routine maker',
@@ -52,8 +55,9 @@ export async function demoReply(query, signal) {
   if (/explain|deadlift|technique|how to do/i.test(query)) {
     return { subsystem: 'exercise_explainer', content: '### Movement spotlight: Romanian deadlift\n\nThis is an **example explanation** for the demo. Live API can answer your specific exercise question.\n\n1. Stand tall with a soft bend in your knees and the weight close to your legs.\n2. Push your hips back, keeping your spine neutral.\n3. Lower only as far as you can maintain control, then drive your hips forward to stand.\n\n**Coach’s cue:** Think “hips back,” not “bend down.” Start light, and stop if you feel pain.' }
   }
-  if (/progress|analy|review/i.test(query)) {
-    return { subsystem: 'past_routines_analyzer', content: '### Let’s look at the bigger picture\n\nTo review your progress, share your **last 2–4 weeks of workouts**, including:\n\n- Exercises, sets, reps, and weights\n- How difficult the last set felt\n- Sleep, recovery, and any discomfort\n\nThis demo hasn’t analyzed your history. In live mode, paste those details into your message so the progress specialist has the context it needs.' }
+  if (/progress|analy|review|last (push|pull|leg)|compar|week|history/i.test(query)) {
+    const analysis = demoPastRoutinesAnalysis(query)
+    return { subsystem: 'past_routines_analyzer', content: analysis.llm_explain, analysis }
   }
   if (/routine|plan|muscle|strength|schedule/i.test(query)) {
     return { subsystem: 'routine_maker', content: 'Here’s an **illustrative starting plan**, not a personalized assessment. The demo uses the same 3-day split; live mode can tailor it to your requirements.\n\n' + demoRoutine + '\n\nSave this recommendation to your routine, then adjust the exercise targets to suit your level.', routine: demoRoutine }
@@ -61,16 +65,27 @@ export async function demoReply(query, signal) {
   return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain. 🌱\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
 }
 
-export async function requestChat(query, sessionId, signal, language, userId) {
+export async function requestChat(query, sessionId, signal, language, userId, onProgress, onResponse) {
+  const steps = []
+  const report = (step) => {
+    if (signal?.aborted) return
+    const index = steps.findIndex(({ id }) => id === step.id)
+    if (index === -1) steps.push(step)
+    else steps[index] = step
+    onProgress?.([...steps])
+  }
   const result = await requestChatAction(
     `${encodeURIComponent(sessionId)}/chat`,
     { query, language, ...(userId === undefined ? {} : { user_id: userId, client_saves_routine: true }) },
-    signal, language, userId,
+    signal, language, userId, report, onResponse,
   )
+  result.steps = [...steps]
   if (!result.saveRequested) return result
   try {
     signal?.throwIfAborted()
-    return await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId)
+    report({ id: 'routine_save', label: 'Saving your confirmed routine' })
+    const saved = await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId)
+    return { ...saved, steps: [...steps] }
   } catch (error) {
     error.routineToSave = result
     throw error
@@ -94,7 +109,7 @@ export async function requestRoutineSave(sessionId, routine, draftId, signal, la
   }
 }
 
-async function requestChatAction(path, payload, signal, language, userId) {
+async function requestChatAction(path, payload, signal, language, userId, onProgress, onResponse) {
   if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
   if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 1)) throw new Error('Routine user ID must be a positive integer.')
   const t = i18n.getFixedT(language.toLowerCase())
@@ -105,7 +120,7 @@ async function requestChatAction(path, payload, signal, language, userId) {
     try {
       response = await fetch(`${baseUrl}/${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify(payload),
         signal: AbortSignal.any([signal, timeoutSignal]),
       })
@@ -128,12 +143,20 @@ async function requestChatAction(path, payload, signal, language, userId) {
       error.backendDown = response.status >= 500
       throw error
     }
-    const data = await response.json()
+    const data = response.headers?.get('content-type')?.includes('application/x-ndjson')
+      ? await readChatStream(response, onProgress, t)
+      : await response.json()
+    if (!data || typeof data !== 'object') throw new Error(t('The chat API returned an invalid response.'))
     if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error(t('The chat API returned an unknown subsystem.'))
+    onResponse?.(data)
     if (typeof data.response === 'string') return { subsystem: data.subsystem, content: data.response }
     if (data.subsystem === 'exercise_explainer') {
       if (!isExerciseList(data.response)) throw new Error(t('The chat API returned an invalid exercise list.'))
       return { subsystem: data.subsystem, content: data.response }
+    }
+    if (data.subsystem === 'past_routines_analyzer') {
+      if (!isPastRoutinesAnalysis(data.response)) throw new Error(t('The chat API returned an invalid response.'))
+      return { subsystem: data.subsystem, content: data.response.llm_explain, analysis: data.response }
     }
     const result = data.response
     if (!result || typeof result.message !== 'string' ||

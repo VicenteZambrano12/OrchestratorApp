@@ -9,12 +9,13 @@ from pydantic import BaseModel
 
 from systems.exercise_explainer.ExerciseExplainer import ExerciseExplainer
 from systems.orch.Orchestrator import Orchestrator
-from systems.past_routines_analyzer.PastRoutinesAnalyzer import PastRoutinesAnalyzer
+from systems.past_routines_analyzer.PastRoutinesWorkflow import PastRoutinesWorkflow
 from systems.routinemaker.RoutineMaker import RoutineMaker
 from utils.pipeline.dataclass.models import PipelineResult
 from utils.pipeline.func.handle_with_subsystem import handle_with_subsystem
 from utils.routinemaker.dataclass.models import RoutineMakerResult, RoutineParameters, RoutinePlan
 from utils.exercise_explainer.dataclass.models import ExerciseExplanation
+from utils.past_routines_analyzer.dataclass.models import PastRoutinesAnalysis
 
 
 def _dump_model(value: Any) -> Any:
@@ -34,7 +35,7 @@ class Pipeline:
         *,
         routine_maker: RoutineMaker | None = None,
         exercise_explainer: ExerciseExplainer | None = None,
-        past_routines_analyzer: PastRoutinesAnalyzer | None = None,
+        past_routines_analyzer: PastRoutinesWorkflow | None = None,
         turn_setter: Any | None = None,
         turn_getter: Any | None = None,
         memory_turns: int = 2,
@@ -54,15 +55,15 @@ class Pipeline:
         *,
         parameters: RoutineParameters | Mapping[str, object] | None = None,
         routine: RoutinePlan | None = None,
-        history: str | None = None,
         session_id: str | None = None,
         user_id: int | None = None,
         client_saves_routine: bool = False,
-    ) -> str | RoutineMakerResult | list[ExerciseExplanation]:
+    ) -> str | RoutineMakerResult | list[ExerciseExplanation] | PastRoutinesAnalysis:
         """Return the selected system's result, or a localized no-match message.
 
         Dependencies are created on first use and reused on subsequent calls.
-        Routine drafts are cached per session/user; analyzer history is caller-owned. Invalid requests,
+        Routine drafts are cached per session/user; past-routine analysis reads the
+        user's logged workouts and requires user_id. Invalid requests,
         unsupported routing IDs, and system/provider errors propagate.
         """
         return self.handle_with_subsystem(
@@ -70,7 +71,6 @@ class Pipeline:
             language,
             parameters=parameters,
             routine=routine,
-            history=history,
             session_id=session_id,
             user_id=user_id,
             **({"client_saves_routine": True} if client_saves_routine else {}),
@@ -83,7 +83,6 @@ class Pipeline:
         *,
         parameters: RoutineParameters | Mapping[str, object] | None = None,
         routine: RoutinePlan | None = None,
-        history: str | None = None,
         session_id: str | None = None,
         user_id: int | None = None,
         client_saves_routine: bool = False,
@@ -91,7 +90,7 @@ class Pipeline:
         """Route once and return the selected subsystem with its unchanged result.
 
         A no-match answer uses the reserved `no_system` ID. Dependencies remain
-        lazy and reusable; routine drafts are session/user-scoped and history is caller-owned.
+        lazy and reusable; routine drafts and past-routine analysis are user-scoped.
         Validation, routing, provider, and system failures propagate unchanged.
         When `session_id` and a turn setter are provided, the turn is stored
         after a successful result.
@@ -107,7 +106,6 @@ class Pipeline:
             language,
             parameters=parameters,
             routine=routine,
-            history=history,
             memory=memory,
             session_id=session_id,
             user_id=user_id,
@@ -119,6 +117,11 @@ class Pipeline:
                 self._turn_setter.set(
                     session_id, query, response.message, result.subsystem,
                     routine=response.routine.model_dump(mode="json") if response.routine else None,
+                )
+            elif isinstance(response, PastRoutinesAnalysis):
+                # Store only the explanation; raw rows would bloat routing memory.
+                self._turn_setter.set(
+                    session_id, query, response.llm_explain, result.subsystem
                 )
             else:
                 if not isinstance(response, str):

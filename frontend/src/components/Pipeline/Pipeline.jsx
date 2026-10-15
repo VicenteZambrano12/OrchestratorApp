@@ -1,26 +1,22 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, Circle, CircleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { usePipelineExpansion } from '../../features/Pipeline/expansion/usePipelineExpansion'
-import { getPipelineStages } from '../../features/Pipeline/request-status/getPipelineStages'
 
-export default function Pipeline({ subsystem, pending = false, demo = true }) {
+export default function Pipeline({ steps = [], pending = false, failed = false }) {
   const { t } = useTranslation()
-  const { expanded, toggleExpansion } = usePipelineExpansion()
-  const stages = getPipelineStages(subsystem, pending)
+  steps = steps.filter((step) => step.kind !== 'sql')
+  if (!steps.length) return pending ? <p className="pipeline-waiting" role="status">{t('Connecting to your coach')}</p> : null
   return (
-    <div className={`pipeline ${pending ? 'is-pending' : ''}`}>
-      <button className="pipeline-toggle" onClick={toggleExpansion} aria-expanded={expanded}>
-        <span><span className={pending ? 'status-dot pulsing' : 'status-dot'} />{t(pending ? 'Working on your request' : 'Your coaching team, in sync')}</span>
-        <span className="pipeline-meta">{t(demo ? 'Demo pipeline' : 'Request status')}<ChevronDown size={14} className={expanded ? 'rotated' : ''} /></span>
-      </button>
-      {expanded && <div className="pipeline-stages">{stages.map(({ name, detail, icon: Icon }, index) => (
-        <div className="pipeline-stage" key={name}>
-          <span className="stage-icon"><Icon size={15} /></span>
-          <div><strong>{t(name)}</strong><p>{t(detail)}</p></div>
-          {!pending && <Check size={14} className="stage-check" />}
-          {pending && index === 0 && <span className="loading-ring" />}
-        </div>
-      ))}<p className="pipeline-disclaimer">{t(demo ? 'Illustrative steps for this mockup.' : 'The API returns a final result, not live intermediate steps.')}</p></div>}
-    </div>
+    <ol className={`pipeline pipeline-steps ${pending ? 'is-pending' : ''}`} aria-label={t('Request steps')}>
+      {steps.map(({ id, label }, index) => {
+        const active = pending && index === steps.length - 1
+        const interrupted = failed && index === steps.length - 1
+        const Icon = interrupted ? CircleAlert : failed ? Circle : Check
+        return <li className={`pipeline-stage${active ? ' is-active' : ''}`} key={id}>
+          <span className="stage-icon" aria-hidden="true">{active ? <span className="loading-ring" /> : <Icon size={14} />}</span>
+          <span>{t(label)}</span>
+          {(active || interrupted) && <span className="sr-only">{t(active ? 'In progress' : 'Interrupted')}</span>}
+        </li>
+      })}
+    </ol>
   )
 }
