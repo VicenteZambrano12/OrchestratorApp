@@ -1,8 +1,43 @@
 # Production infrastructure
 
-Terraform manages the production application bucket and uses GitHub OIDC for
-deployment. Only the `prod` environment exists. No application container, Neon
-migration, Redis deployment, or bucket objects are included.
+Terraform manages the production application bucket, empty Neon database, and
+database connection secret, using GitHub OIDC for GCP deployment. Only the
+`prod` environment exists. No application container, SQL schema, data migration,
+Redis deployment, or bucket objects are included.
+
+## Neon database
+
+The reusable [`modules/database`](modules/database/README.md) module creates
+the empty `orchestrator_app` database in Frankfurt (`aws-eu-central-1`), on the
+default `prod` branch with one 0.25 CU compute that suspends after five minutes.
+Neon does not offer Madrid. The pooled PostgreSQL TLS connection URI is stored
+in `orchestratorapp-prod-database-url` in Secret Manager, replicated in Madrid.
+The module documentation includes all inputs, outputs, cost caveats, mock tests,
+and the future Cloud Run wiring example.
+
+Before deploying, set the **repository Actions secret `NEON_API_KEY`** using a
+key for your Neon Free account/organization. The 0.25 CU limit does not select
+or enforce the Free billing plan. GCP Secret Manager and cross-cloud traffic
+may have separate costs. Do not paste the key into the repository or chat.
+
+Run as an administrator:
+
+```bash
+bash infra/scripts/bootstrap-database-access.sh
+```
+
+This creates `orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com` for
+future Cloud Run use. Terraform grants it accessor access only on the database
+secret. The separate `orchestratorapp` deployment account receives project-level
+`secretmanager.secrets.create` (creation cannot be scoped to a nonexistent
+secret) and secret-management permissions conditioned on this exact database
+secret and its versions. It cannot delete the secret or read other app secrets
+through these grants. The Secret Manager and IAM APIs must already be enabled.
+New custom roles can take time to propagate before binding them.
+
+Database credentials are present in Terraform state and binary plan artifacts.
+`sensitive` prevents ordinary CLI display but does not remove them from state.
+The database remains empty; the existing SQLite backend is not modified.
 
 ## Application bucket
 
@@ -132,10 +167,11 @@ Set these **repository Actions secrets**, retaining the supplied workflow's name
 | --- | --- |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/31049783945/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_TERRAFORM_SERVICE_ACCOUNT` | `orchestratorapp@basicrahgapp.iam.gserviceaccount.com` |
+| `NEON_API_KEY` | Your Neon API key for the intended Free account/organization |
 
-These identifiers are not private credentials, but using secrets keeps
-compatibility with the example's `${{ secrets.* }}` references. Do not upload
-a service-account JSON key.
+The two GCP identifiers are not private credentials, but using secrets keeps
+compatibility with the example's `${{ secrets.* }}` references. `NEON_API_KEY`
+is a private credential. Do not upload a service-account JSON key.
 
 **No GitHub repository variables are required.** The project, region, and bucket
 name are declared in the production Terraform variables file. Artifact Registry
@@ -184,6 +220,7 @@ before GitHub can create the bucket. Do not create it manually first.
 ```bash
 bash -n infra/scripts/bootstrap-state-access.sh
 bash -n infra/scripts/bootstrap-storage-access.sh
+bash -n infra/scripts/bootstrap-database-access.sh
 terraform fmt -check -recursive infra
 terraform -chdir=infra/environments/prod init -input=false -lockfile=readonly
 terraform -chdir=infra/environments/prod validate
