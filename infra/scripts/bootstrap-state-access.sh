@@ -26,16 +26,12 @@ if [[ "${CURRENT_CONDITION}" != *"${APP_CONDITION}"* ]]; then
     --attribute-condition="(${CURRENT_CONDITION}) || ${APP_CONDITION}"
 fi
 
-# The example authenticates both before and inside the protected prod environment.
-for SUBJECT in \
-  "repo:${REPOSITORY}:ref:refs/heads/main" \
-  "repo:${REPOSITORY}:environment:prod"; do
-  gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" \
-    --project="${PROJECT_ID}" \
-    --role=roles/iam.workloadIdentityUser \
-    --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/subject/${SUBJECT}" \
-    --condition=None --quiet
-done
+# Use the mapped repository claim; the provider enforces the main branch.
+gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" \
+  --project="${PROJECT_ID}" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${REPOSITORY}" \
+  --condition=None --quiet
 
 # GCS object listing cannot be restricted by an object-name IAM condition.
 ROLE_NAMES="$(gcloud iam roles list --project="${PROJECT_ID}" --format='value(name)')"
