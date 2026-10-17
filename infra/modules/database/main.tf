@@ -1,10 +1,11 @@
 resource "neon_project" "default" {
-  name                     = "${var.app_name}-${var.environment}"
-  org_id                   = var.neon_org_id
-  region_id                = var.neon_region_id
-  pg_version               = var.pg_version
-  autoscaling_limit_min_cu = 0.25
-  autoscaling_limit_max_cu = 0.25
+  name                      = "${var.app_name}-${var.environment}"
+  org_id                    = var.neon_org_id
+  region_id                 = var.neon_region_id
+  pg_version                = var.pg_version
+  history_retention_seconds = 21600
+  autoscaling_limit_min_cu  = 0.25
+  autoscaling_limit_max_cu  = 0.25
 
   branch {
     name = var.environment

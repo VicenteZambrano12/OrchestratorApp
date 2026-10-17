@@ -49,6 +49,11 @@ run "demo_database_plan" {
   }
 
   assert {
+    condition     = neon_project.default.history_retention_seconds == 21600
+    error_message = "History retention must be explicitly limited to six hours; the provider's 24-hour default exceeds the Free-plan allowance."
+  }
+
+  assert {
     condition     = neon_project.default.branch[0].name == "prod" && neon_role.app.branch_id == "br-demo" && neon_database.app.branch_id == "br-demo"
     error_message = "The app must reuse the default production branch, not create extra computes."
   }

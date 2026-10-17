@@ -10,6 +10,8 @@ Redis deployment, or bucket objects are included.
 The reusable [`modules/database`](modules/database/README.md) module creates
 the empty `orchestrator_app` database in Frankfurt (`aws-eu-central-1`), on the
 default `prod` branch with one 0.25 CU compute that suspends after five minutes.
+History retention is explicitly limited to six hours (21,600 seconds), avoiding
+the pinned provider's incompatible 24-hour default.
 The suspension interval is enforced by Neon's Free plan, not explicitly set
 through the API. Verify the created primary compute in the Neon console has
 0.25 CU min/max and a 300-second timeout after applying.
