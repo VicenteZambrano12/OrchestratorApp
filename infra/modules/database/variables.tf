@@ -29,6 +29,16 @@ variable "environment" {
   }
 }
 
+variable "neon_org_id" {
+  type        = string
+  description = "Neon organization ID from Organization settings. Use an organization on the Free plan."
+
+  validation {
+    condition     = can(regex("^org-[a-z0-9]+(-[a-z0-9]+)*$", var.neon_org_id))
+    error_message = "neon_org_id must be a nonempty Neon organization ID beginning with org-."
+  }
+}
+
 variable "neon_region_id" {
   type        = string
   description = "Neon AWS region; Frankfurt is used for the Madrid-hosted app. Immutable after project creation."

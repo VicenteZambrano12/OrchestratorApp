@@ -45,6 +45,13 @@ repository Actions secret `NEON_API_KEY`; do not commit it or put it in
 Terraform variables or logs. Use a key scoped to the intended Free organization
 where available. Both plan and apply require it.
 
+Set the non-secret repository Actions variable `NEON_ORG_ID` to the organization
+ID beginning with `org-` from Neon Organization settings. The workflow passes
+it as `TF_VAR_neon_org_id`, and the module sets `neon_project.org_id` explicitly.
+The API key must have access to that organization. For local Terraform commands,
+export `TF_VAR_neon_org_id` as well; Terraform does not load the app's local
+environment file or its `NEON_ID_ORG` setting automatically.
+
 For GCP, use the existing GitHub OIDC setup. Before first deployment, run
 `bash infra/scripts/bootstrap-database-access.sh` from the repository root as
 an authorized administrator. This creates the separate runtime account and
@@ -62,6 +69,7 @@ module "database" {
   project_id                      = var.project_id
   app_name                        = "orchestratorapp"
   environment                     = "prod"
+  neon_org_id                     = var.neon_org_id
   neon_region_id                  = var.neon_region_id
   db_name                         = "orchestrator_app"
   db_user                         = "orchestrator_app"

@@ -9,6 +9,7 @@ env:
   TF_WORKING_DIR: infra/environments/prod
   TF_IN_AUTOMATION: "true"
   TF_VERSION: "1.13.5"
+  TF_VAR_neon_org_id: ${{ vars.NEON_ORG_ID }}
 
 concurrency:
   group: terraform-prod
@@ -54,12 +55,16 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform workspace list
 
-      - name: Check Neon API key configuration
+      - name: Check Neon configuration
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
           if [ -z "$NEON_API_KEY" ]; then
             echo "::error::Set the NEON_API_KEY repository Actions secret before deploying the database."
+            exit 1
+          fi
+          if [[ ! "$TF_VAR_neon_org_id" =~ ^org-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::Set the NEON_ORG_ID repository Actions variable to your Neon organization ID."
             exit 1
           fi
 

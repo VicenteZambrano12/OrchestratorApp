@@ -23,6 +23,7 @@ mock_provider "google" {
 variables {
   project_id                      = "basicrahgapp"
   app_name                        = "orchestratorapp"
+  neon_org_id                     = "org-demo-12345678"
   db_name                         = "orchestrator_app"
   db_user                         = "orchestrator_app"
   cloud_run_service_account_email = "orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com"
@@ -30,6 +31,11 @@ variables {
 
 run "demo_database_plan" {
   command = plan
+
+  assert {
+    condition     = neon_project.default.org_id == "org-demo-12345678"
+    error_message = "The project must be created in the explicitly supplied Neon organization."
+  }
 
   assert {
     condition     = neon_project.default.region_id == "aws-eu-central-1" && neon_project.default.pg_version == 16
@@ -80,6 +86,22 @@ run "demo_database_plan" {
     condition     = output.database_host == "ep-demo-pooler.eu-central-1.aws.neon.tech" && output.neon_project_id == "demo-project"
     error_message = "Public outputs must expose the pooled hostname and project ID."
   }
+}
+
+run "reject_empty_organization" {
+  command = plan
+  variables {
+    neon_org_id = ""
+  }
+  expect_failures = [var.neon_org_id]
+}
+
+run "reject_invalid_organization" {
+  command = plan
+  variables {
+    neon_org_id = "not-an-organization"
+  }
+  expect_failures = [var.neon_org_id]
 }
 
 run "reject_sql_in_database_name" {

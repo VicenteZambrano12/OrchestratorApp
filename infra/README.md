@@ -20,6 +20,18 @@ key for your Neon Free account/organization. The 0.25 CU limit does not select
 or enforce the Free billing plan. GCP Secret Manager and cross-cloud traffic
 may have separate costs. Do not paste the key into the repository or chat.
 
+Also set the non-secret **repository Actions variable `NEON_ORG_ID`** to your
+organization ID beginning with `org-` from Neon Organization settings.
+The workflow maps it to `TF_VAR_neon_org_id` and passes it to `neon_project.org_id`.
+The API key must belong to or have access to that organization. The local
+`NEON_ID_ORG` setting is not read by Terraform or GitHub Actions automatically.
+For local Terraform commands, export `TF_VAR_neon_org_id` explicitly.
+
+If an apply partially succeeded before a Neon error, generate a fresh plan
+after fixing configuration. Terraform will refresh and reuse the secret and
+IAM resources already recorded in state. Do not reuse the old plan artifact
+or delete those resources manually.
+
 Run as an administrator:
 
 ```bash
@@ -173,7 +185,7 @@ The two GCP identifiers are not private credentials, but using secrets keeps
 compatibility with the example's `${{ secrets.* }}` references. `NEON_API_KEY`
 is a private credential. Do not upload a service-account JSON key.
 
-**No GitHub repository variables are required.** The project, region, and bucket
+**The `NEON_ORG_ID` GitHub repository variable is required.** The GCP project, region, and bucket
 name are declared in the production Terraform variables file. Artifact Registry
 configuration is deferred until application container deployment.
 

@@ -33,6 +33,7 @@ module "database" {
   project_id                      = var.project_id
   app_name                        = "orchestratorapp"
   environment                     = "prod"
+  neon_org_id                     = var.neon_org_id
   neon_region_id                  = var.neon_region_id
   db_name                         = "orchestrator_app"
   db_user                         = "orchestrator_app"
