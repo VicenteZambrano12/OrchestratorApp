@@ -21,6 +21,32 @@ through `environments/prod/main.tf`. Production settings are in
 
 This is separate from the existing Terraform state bucket below.
 
+### Manual image migration
+
+After the bucket has been created, upload the contents of `database/images/`
+under the `images/` prefix with the standalone standard-library Python script:
+
+```bash
+gcloud auth login
+python3 scripts/migrate_images.py --dry-run
+python3 scripts/migrate_images.py
+```
+
+The script uses your active `gcloud` identity; no service-account key or Python
+package installation is needed. That identity needs object listing, reading,
+creation, and replacement permissions on the app bucket (for example,
+`roles/storage.objectUser` on this bucket). The Terraform CI account deliberately
+does not have these object permissions; do not impersonate it for this migration.
+
+Paths are resolved relative to the script, independently of the working directory.
+For example, `database/images/anatomy/example.png` becomes
+`gs://orch_app_bucket/images/anatomy/example.png`. Transfers are recursive and
+checksum-based, skipping unchanged files and `.gitkeep` placeholders. Changed
+destination objects are replaced; unrelated destination objects and all local
+files are left untouched. Authentication and transfer errors exit nonzero.
+The script does not create the bucket, change IAM, or make objects public.
+It is manual only and is not part of the deployment workflow.
+
 ## Backend
 
 The backend is defined in
@@ -115,8 +141,8 @@ a service-account JSON key.
 name are declared in the production Terraform variables file. Artifact Registry
 configuration is deferred until application container deployment.
 
-Create the GitHub environment `prod`, restrict its deployment branch to `main`,
-and configure reviewers if production approval is required. The workflow uses
+Create the GitHub environment `prod`, allow the `main` and `refs/pull/*/merge`
+branch patterns, and configure required reviewers. The workflow uses
 `environment: prod` for environment protections; GCP trust uses the mapped
 repository claim and the provider's branch restriction.
 
@@ -133,8 +159,15 @@ trigger and two-job saved-plan/apply sequence:
    again, downloads the saved plan, initializes Terraform with the committed
    provider lock file, and applies that exact plan without replanning.
 
-Configure `VicenteZambrano12` as a required reviewer on `prod`, allow only `main`
-deployments, and disable administrator bypass. Self-review must remain allowed
+Configure `VicenteZambrano12` as a required reviewer on `prod`, allow `main` and
+`refs/pull/*/merge` deployments, and disable administrator bypass. GitHub
+environment branch protection can evaluate a `pull_request` deployment against
+its PR merge ref even when the workflow runs after merging. Without the merge-ref
+pattern, the apply job is rejected before it reaches the reviewer approval gate.
+The workflow's `closed` trigger targeting `main` and merged-`dev` condition still
+gate deployment; allowing the merge-ref pattern does not make unmerged PRs
+eligible to apply this workflow. The GCP provider's `main` restriction is unchanged.
+Self-review must remain allowed
 if the repository owner both merges and approves the deployment.
 An environment name alone does not enforce approval; its protection rules do.
 Plan artifacts expire after one day, so approve within that window or rerun.
