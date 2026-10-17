@@ -9,6 +9,9 @@ Manager connection-secret integration. Files follow `versions.tf`,
 
 - Frankfurt (`aws-eu-central-1`), because Neon does not support Madrid.
 - PostgreSQL 16 by default.
+- History retention is explicitly set to 21,600 seconds (six hours), the maximum
+  allowed by the target Free organization. The pinned provider otherwise sends
+  its 86,400-second default, which Neon rejects on this plan.
 - One default production branch and one read/write compute. No replicas or
   additional branches/endpoints are created.
 - Project compute defaults are pinned to 0.25 CU. The Free plan enforces
@@ -154,6 +157,8 @@ terraform -chdir=infra/modules/database test
 
 The tests mock both providers and do not create resources, connect to a
 database, or require real credentials.
+They verify the configured retention value and compute limits, but cannot
+prove Neon API acceptance or validate an organization's current entitlements.
 
 Sources:
 
