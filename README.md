@@ -39,6 +39,122 @@ Neither endpoint requires authentication. Provider credentials are configured
 on the server and must not be included in client requests. `/health` is a liveness
 check only: it does not validate provider readiness.
 
+## Production image builds and Artifact Registry
+
+The original workflow ordering is preserved: a merged `dev` → `main` PR runs
+source filtering, builds/pushes the image when needed, saves a Terraform plan,
+then waits for `prod` approval before apply. Open, unmerged, or closed-without-
+merge PRs do not publish images.
+
+The dedicated repository is
+`europe-southwest1-docker.pkg.dev/basicrahgapp/orchestratorapp-repo`; the image
+package is `orchestratorapp`. It does not share cleanup policies with the
+example's `portfolio-repo/basicragapp`.
+
+Because the example builds **before** Terraform apply, bootstrap the empty
+repository and CI access once as an administrator:
+
+```bash
+bash infra/scripts/bootstrap-artifact-registry-access.sh
+```
+
+Production Terraform imports that exact repository and manages its settings.
+CI receives repository-scoped Artifact Registry Writer plus a custom role
+limited to repository read/update and image-version deletion. It cannot create
+or delete other repositories. No new GitHub secret is needed; the existing OIDC
+deployer account is reused.
+
+Repository variables must match production configuration:
+
+| GitHub variable | Value |
+| --- | --- |
+| `GCP_PROJECT_ID` | `basicrahgapp` |
+| `GCP_REGION` | `europe-southwest1` |
+| `GCP_AR_REPOSITORY` | `orchestratorapp-repo` |
+
+Application source, frontend, dependency manifests, Dockerfile, container-context
+rules, or image-workflow changes trigger a build tagged with the merge commit
+SHA. An already-published SHA is reused on a retry. Infrastructure-only PRs reuse
+the newest image digest; an empty repository always triggers the initial build.
+The selected immutable digest is passed as `app_container_image` into Terraform
+and exposed as an output for the upcoming Cloud Run integration. This step
+does not create or deploy Cloud Run.
+
+After publishing/resolving the image, CI deletes older versions of this exact
+image package and verifies **at most two newest versions remain**. It never
+deletes the selected image or images belonging to another package. Single-platform
+`linux/amd64` builds disable separate provenance/SBOM manifests so those auxiliary
+versions do not consume the two-image allowance. Artifact Registry also has
+native KEEP-two / DELETE-old policies as a background safeguard; native cleanup
+alone is asynchronous and does not enforce an immediate limit.
+
+Retention is by image creation time, not tag update time. The first build can
+only retain one version; subsequent distinct builds retain two. Older images
+are intentionally unavailable for rollback. A failed plan does not remove the
+newly pushed image, matching the example's build-before-approval workflow.
+
+```bash
+python3 -m unittest discover -s scripts -p test_registry_images.py -v
+```
+
+## Combined frontend/backend container
+
+The root [Dockerfile](Dockerfile) uses separate Node and Python dependency build
+stages, then runs one non-root Python process. The final image contains the
+frontend build and backend source/dependencies, but no Node tooling, local
+database/images, environment files, or local GCP credentials. Build-context
+inputs are restricted by [.dockerignore](.dockerignore).
+
+```bash
+docker build -t orchestratorapp:local .
+```
+
+The production entry point is `python -m server` with `backend/src` on
+`PYTHONPATH`. It binds `0.0.0.0` on Cloud Run's `PORT` (default `8080`):
+
+- `/` serves the built frontend.
+- `/api/health` reaches the backend liveness endpoint.
+- `/api/docs` and `/api/openapi.json` expose backend documentation.
+- `/api/database/images/...` uses the existing image-serving configuration.
+
+The frontend is built with `VITE_API_BASE_URL=/api`; no development proxy or
+second server is needed. The existing backend-only development command and
+unprefixed routes remain unchanged.
+
+The image defaults to `MODE=CLOUD`. Supply the runtime environment variables
+directly, or mount the populated `orch_app_secret` JSON as a **read-only file**
+and set `APP_SECRETS_FILE` to its path. For the upcoming Cloud Run deployment,
+mount the secret at `/var/secrets/orch_app_secret.json` and set:
+
+```text
+APP_SECRETS_FILE=/var/secrets/orch_app_secret.json
+```
+
+The entry point loads the JSON before importing the backend. Explicit process
+environment values take precedence over JSON values. Invalid/missing configured
+files fail startup without printing credentials. The application uses its runtime
+service account for GCS; do not include a service-account key file in the image.
+This Dockerfile does not deploy Cloud Run or change Terraform.
+
+For a local Docker run with an existing, securely stored runtime JSON file
+readable by container UID `10001`:
+
+```bash
+docker run --rm -p 8080:8080 \
+  --mount type=bind,src=/secure/path/runtime.json,dst=/run/secrets/app.json,readonly \
+  -e APP_SECRETS_FILE=/run/secrets/app.json \
+  orchestratorapp:local
+```
+
+Local GCS access additionally requires ADC available to the container. Do not
+pass the entire development environment file: it includes deployment-only
+credentials and local-machine configuration.
+
+The container intentionally uses one worker because chat/routine session state
+currently lives in process-local fakeredis. Multiple workers or Cloud Run
+instances do not share that state; deploying multiple instances requires a
+shared store first.
+
 ## SQL client
 
 The reusable synchronous client lives in `backend/src/sql/SQLClient.py`.

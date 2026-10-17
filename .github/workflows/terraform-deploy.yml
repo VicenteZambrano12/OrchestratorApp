@@ -6,10 +6,17 @@ on:
     branches: [main]
 
 env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  AR_REPOSITORY: ${{ vars.GCP_AR_REPOSITORY }}
+  IMAGE_NAME: orchestratorapp
   TF_WORKING_DIR: infra/environments/prod
   TF_IN_AUTOMATION: "true"
   TF_VERSION: "1.13.5"
   TF_VAR_neon_org_id: ${{ vars.NEON_ORG_ID }}
+  TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_region: ${{ vars.GCP_REGION }}
+  TF_VAR_artifact_registry_repository_id: ${{ vars.GCP_AR_REPOSITORY }}
 
 concurrency:
   group: terraform-prod
@@ -22,17 +29,101 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: read
+    outputs:
+      image: ${{ steps.published.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
 
+      - name: Check for source changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'frontend/**'
+              - 'backend/src/**'
+              - 'backend/pyproject.toml'
+              - 'backend/uv.lock'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - '.github/workflows/terraform-deploy.yml'
+
       - name: Authenticate to GCP (Workload Identity Federation)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_TERRAFORM_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify Artifact Registry bootstrap
+        run: |
+          if [[ -z "$PROJECT_ID" || -z "$REGION" || -z "$AR_REPOSITORY" ]]; then
+            echo "::error::Set GCP_PROJECT_ID, GCP_REGION, and GCP_AR_REPOSITORY repository variables."
+            exit 1
+          fi
+          gcloud artifacts repositories describe "$AR_REPOSITORY" \
+            --project="$PROJECT_ID" --location="$REGION" --format='value(name)'
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Set image tag and build flag
+        id: image
+        env:
+          APP_CHANGED: ${{ steps.filter.outputs.app }}
+        run: |
+          python3 scripts/registry_images.py select \
+            --image-base "${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/${IMAGE_NAME}" \
+            --sha "$GITHUB_SHA" --source-changed "$APP_CHANGED"
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        if: steps.image.outputs.build == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+            --load --tag "$IMAGE" .
+
+      - name: Push Docker image
+        if: steps.image.outputs.build == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: docker push "$IMAGE"
+
+      - name: Resolve immutable application image
+        id: published
+        env:
+          SELECTED_IMAGE: ${{ steps.image.outputs.image }}
+          BUILT: ${{ steps.image.outputs.build }}
+        run: |
+          IMAGE="$SELECTED_IMAGE"
+          if [[ "$BUILT" == "true" ]]; then
+            IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' "$SELECTED_IMAGE")"
+          fi
+          BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/${IMAGE_NAME}"
+          if [[ "$IMAGE" != "$BASE@"* || ! "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The application image must resolve to a digest in its dedicated repository."
+            exit 1
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Retain only the two newest application images
+        env:
+          IMAGE: ${{ steps.published.outputs.image }}
+        run: |
+          python3 scripts/registry_images.py prune \
+            --image-base "${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/${IMAGE_NAME}" \
+            --keep-digest "${IMAGE##*@}"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -71,6 +162,7 @@ jobs:
       - name: Terraform Plan
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          TF_VAR_app_container_image: ${{ steps.published.outputs.image }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -input=false -lock-timeout=60s -out=tfplan
 

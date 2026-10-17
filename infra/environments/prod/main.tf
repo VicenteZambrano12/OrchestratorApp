@@ -20,6 +20,20 @@ provider "google" {
   region  = var.region
 }
 
+module "artifact_registry" {
+  source        = "../../modules/artifact_registry"
+  project_id    = var.project_id
+  location      = var.region
+  repository_id = var.artifact_registry_repository_id
+  image_name    = "orchestratorapp"
+  common_labels = var.common_labels
+}
+
+import {
+  id = "projects/${var.project_id}/locations/${var.region}/repositories/${var.artifact_registry_repository_id}"
+  to = module.artifact_registry.google_artifact_registry_repository.default
+}
+
 module "storage" {
   source                          = "../../modules/storage"
   project_id                      = var.project_id
