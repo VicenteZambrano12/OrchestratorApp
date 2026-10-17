@@ -1,8 +1,43 @@
 # Production infrastructure
 
-Terraform manages the production application bucket and uses GitHub OIDC for
-deployment. Only the `prod` environment exists. No application container, Neon
-migration, Redis deployment, or bucket objects are included.
+Terraform manages the production application bucket, empty Neon database, and
+database connection secret, using GitHub OIDC for GCP deployment. Only the
+`prod` environment exists. No application container, SQL schema, data migration,
+Redis deployment, or bucket objects are included.
+
+## Neon database
+
+The reusable [`modules/database`](modules/database/README.md) module creates
+the empty `orchestrator_app` database in Frankfurt (`aws-eu-central-1`), on the
+default `prod` branch with one 0.25 CU compute that suspends after five minutes.
+Neon does not offer Madrid. The pooled PostgreSQL TLS connection URI is stored
+in `orchestratorapp-prod-database-url` in Secret Manager, replicated in Madrid.
+The module documentation includes all inputs, outputs, cost caveats, mock tests,
+and the future Cloud Run wiring example.
+
+Before deploying, set the **repository Actions secret `NEON_API_KEY`** using a
+key for your Neon Free account/organization. The 0.25 CU limit does not select
+or enforce the Free billing plan. GCP Secret Manager and cross-cloud traffic
+may have separate costs. Do not paste the key into the repository or chat.
+
+Run as an administrator:
+
+```bash
+bash infra/scripts/bootstrap-database-access.sh
+```
+
+This creates `orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com` for
+future Cloud Run use. Terraform grants it accessor access only on the database
+secret. The separate `orchestratorapp` deployment account receives project-level
+`secretmanager.secrets.create` (creation cannot be scoped to a nonexistent
+secret) and secret-management permissions conditioned on this exact database
+secret and its versions. It cannot delete the secret or read other app secrets
+through these grants. The Secret Manager and IAM APIs must already be enabled.
+New custom roles can take time to propagate before binding them.
+
+Database credentials are present in Terraform state and binary plan artifacts.
+`sensitive` prevents ordinary CLI display but does not remove them from state.
+The database remains empty; the existing SQLite backend is not modified.
 
 ## Application bucket
 
@@ -20,6 +55,32 @@ through `environments/prod/main.tf`. Production settings are in
   `force_destroy = false` prevents automatic removal of objects during deletion.
 
 This is separate from the existing Terraform state bucket below.
+
+### Manual image migration
+
+After the bucket has been created, upload the contents of `database/images/`
+under the `images/` prefix with the standalone standard-library Python script:
+
+```bash
+gcloud auth login
+python3 scripts/migrate_images.py --dry-run
+python3 scripts/migrate_images.py
+```
+
+The script uses your active `gcloud` identity; no service-account key or Python
+package installation is needed. That identity needs object listing, reading,
+creation, and replacement permissions on the app bucket (for example,
+`roles/storage.objectUser` on this bucket). The Terraform CI account deliberately
+does not have these object permissions; do not impersonate it for this migration.
+
+Paths are resolved relative to the script, independently of the working directory.
+For example, `database/images/anatomy/example.png` becomes
+`gs://orch_app_bucket/images/anatomy/example.png`. Transfers are recursive and
+checksum-based, skipping unchanged files and `.gitkeep` placeholders. Changed
+destination objects are replaced; unrelated destination objects and all local
+files are left untouched. Authentication and transfer errors exit nonzero.
+The script does not create the bucket, change IAM, or make objects public.
+It is manual only and is not part of the deployment workflow.
 
 ## Backend
 
@@ -106,17 +167,18 @@ Set these **repository Actions secrets**, retaining the supplied workflow's name
 | --- | --- |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/31049783945/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_TERRAFORM_SERVICE_ACCOUNT` | `orchestratorapp@basicrahgapp.iam.gserviceaccount.com` |
+| `NEON_API_KEY` | Your Neon API key for the intended Free account/organization |
 
-These identifiers are not private credentials, but using secrets keeps
-compatibility with the example's `${{ secrets.* }}` references. Do not upload
-a service-account JSON key.
+The two GCP identifiers are not private credentials, but using secrets keeps
+compatibility with the example's `${{ secrets.* }}` references. `NEON_API_KEY`
+is a private credential. Do not upload a service-account JSON key.
 
 **No GitHub repository variables are required.** The project, region, and bucket
 name are declared in the production Terraform variables file. Artifact Registry
 configuration is deferred until application container deployment.
 
-Create the GitHub environment `prod`, restrict its deployment branch to `main`,
-and configure reviewers if production approval is required. The workflow uses
+Create the GitHub environment `prod`, allow the `main` and `refs/pull/*/merge`
+branch patterns, and configure required reviewers. The workflow uses
 `environment: prod` for environment protections; GCP trust uses the mapped
 repository claim and the provider's branch restriction.
 
@@ -133,8 +195,15 @@ trigger and two-job saved-plan/apply sequence:
    again, downloads the saved plan, initializes Terraform with the committed
    provider lock file, and applies that exact plan without replanning.
 
-Configure `VicenteZambrano12` as a required reviewer on `prod`, allow only `main`
-deployments, and disable administrator bypass. Self-review must remain allowed
+Configure `VicenteZambrano12` as a required reviewer on `prod`, allow `main` and
+`refs/pull/*/merge` deployments, and disable administrator bypass. GitHub
+environment branch protection can evaluate a `pull_request` deployment against
+its PR merge ref even when the workflow runs after merging. Without the merge-ref
+pattern, the apply job is rejected before it reaches the reviewer approval gate.
+The workflow's `closed` trigger targeting `main` and merged-`dev` condition still
+gate deployment; allowing the merge-ref pattern does not make unmerged PRs
+eligible to apply this workflow. The GCP provider's `main` restriction is unchanged.
+Self-review must remain allowed
 if the repository owner both merges and approves the deployment.
 An environment name alone does not enforce approval; its protection rules do.
 Plan artifacts expire after one day, so approve within that window or rerun.
@@ -151,6 +220,7 @@ before GitHub can create the bucket. Do not create it manually first.
 ```bash
 bash -n infra/scripts/bootstrap-state-access.sh
 bash -n infra/scripts/bootstrap-storage-access.sh
+bash -n infra/scripts/bootstrap-database-access.sh
 terraform fmt -check -recursive infra
 terraform -chdir=infra/environments/prod init -input=false -lockfile=readonly
 terraform -chdir=infra/environments/prod validate

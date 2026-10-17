@@ -23,3 +23,14 @@ variable "common_labels" {
     project    = "portfolio"
   }
 }
+
+variable "neon_region_id" {
+  type        = string
+  description = "Neon region for the production database; Neon does not support Madrid."
+  default     = "aws-eu-central-1"
+}
+
+variable "cloud_run_service_account_email" {
+  type        = string
+  description = "Dedicated runtime identity with access to the database connection secret."
+}

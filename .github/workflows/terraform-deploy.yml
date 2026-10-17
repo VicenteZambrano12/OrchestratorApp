@@ -54,7 +54,18 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform workspace list
 
+      - name: Check Neon API key configuration
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "$NEON_API_KEY" ]; then
+            echo "::error::Set the NEON_API_KEY repository Actions secret before deploying the database."
+            exit 1
+          fi
+
       - name: Terraform Plan
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -input=false -lock-timeout=60s -out=tfplan
 
@@ -105,5 +116,7 @@ jobs:
         run: terraform init -input=false -lockfile=readonly
 
       - name: Terraform Apply
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -input=false -lock-timeout=60s tfplan
