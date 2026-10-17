@@ -44,3 +44,15 @@ variable "cloud_run_service_account_email" {
   type        = string
   description = "Dedicated runtime identity with access to the application secrets and images."
 }
+
+variable "artifact_registry_repository_id" {
+  type        = string
+  description = "Dedicated production Docker repository, matching GCP_AR_REPOSITORY in GitHub."
+  default     = "orchestratorapp-repo"
+}
+
+variable "app_container_image" {
+  type        = string
+  description = "Immutable application image selected by the build-and-plan workflow, ready for Cloud Run wiring."
+  default     = null
+}

@@ -29,3 +29,11 @@ output "app_secret_id" {
 output "app_secret_initial_version" {
   value = module.secrets.initial_version
 }
+
+output "artifact_registry_repository_url" {
+  value = module.artifact_registry.repository_url
+}
+
+output "app_container_image" {
+  value = var.app_container_image
+}
