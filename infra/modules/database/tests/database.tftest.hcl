@@ -14,6 +14,7 @@ mock_provider "neon" {
       password = "test:p@ss/?# +"
     }
   }
+
 }
 
 mock_provider "google" {
@@ -43,13 +44,8 @@ run "demo_database_plan" {
   }
 
   assert {
-    condition     = neon_project.default.autoscaling_limit_min_cu == 0.25 && neon_project.default.autoscaling_limit_max_cu == 0.25 && neon_project.default.suspend_timeout_seconds == 300
-    error_message = "Project defaults must stay at 0.25 CU with five-minute suspension."
-  }
-
-  assert {
-    condition     = neon_project.default.primary_compute[0].autoscaling_limit_min_cu == 0.25 && neon_project.default.primary_compute[0].autoscaling_limit_max_cu == 0.25 && neon_project.default.primary_compute[0].suspend_timeout_seconds == 300
-    error_message = "The initial compute must also stay at 0.25 CU with five-minute suspension."
+    condition     = neon_project.default.autoscaling_limit_min_cu == 0.25 && neon_project.default.autoscaling_limit_max_cu == 0.25
+    error_message = "Project defaults must stay at 0.25 CU without overriding the Free-plan suspension timeout."
   }
 
   assert {

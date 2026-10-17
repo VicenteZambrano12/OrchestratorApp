@@ -5,19 +5,13 @@ resource "neon_project" "default" {
   pg_version               = var.pg_version
   autoscaling_limit_min_cu = 0.25
   autoscaling_limit_max_cu = 0.25
-  suspend_timeout_seconds  = 300
 
   branch {
     name = var.environment
   }
 
-  # Project defaults do not configure the initial compute.
-  primary_compute {
-    autoscaling_limit_min_cu = 0.25
-    autoscaling_limit_max_cu = 0.25
-    suspend_timeout_seconds  = 300
-  }
-
+  # Free fixes the timeout at 300s. This provider sends an override even for
+  # an omitted timeout inside primary_compute, so leave that block computed.
   lifecycle {
     prevent_destroy = true
   }

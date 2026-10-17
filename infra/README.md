@@ -10,6 +10,9 @@ Redis deployment, or bucket objects are included.
 The reusable [`modules/database`](modules/database/README.md) module creates
 the empty `orchestrator_app` database in Frankfurt (`aws-eu-central-1`), on the
 default `prod` branch with one 0.25 CU compute that suspends after five minutes.
+The suspension interval is enforced by Neon's Free plan, not explicitly set
+through the API. Verify the created primary compute in the Neon console has
+0.25 CU min/max and a 300-second timeout after applying.
 Neon does not offer Madrid. The pooled PostgreSQL TLS connection URI is stored
 in `orchestratorapp-prod-database-url` in Secret Manager, replicated in Madrid.
 The module documentation includes all inputs, outputs, cost caveats, mock tests,
