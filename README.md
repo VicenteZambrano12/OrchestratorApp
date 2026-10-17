@@ -96,6 +96,54 @@ Run the client tests without touching the application database:
 PYTHONPATH=backend/src:backend/tests uv run --project backend --locked python -m unittest test_sql_client -v
 ```
 
+## Populate Neon from SQLite
+
+After Terraform has created the Neon database and its connection-secret version,
+run the standalone migration from the repository root:
+
+```bash
+uv run --script scripts/migrate_database.py --dry-run
+uv run --script scripts/migrate_database.py
+```
+
+`uv` installs the script's isolated `psycopg` dependency; the backend dependencies
+are unchanged. The default source is `database/gym_app.db`, resolved relative to
+the script. Use `--source /absolute/path/to/copy.db` to import a different copy.
+Pause local application writes while preparing and running the migration.
+
+The dry run performs SQLite integrity/foreign-key checks and prints table counts.
+It does not connect to Neon, read credentials, or write data.
+
+For the real import, the script uses `DATABASE_URL` from the process environment.
+If unset, it reads the latest `orchestratorapp-prod-database-url` secret in
+`basicrahgapp` using your active `gcloud` identity. Authenticate with
+`gcloud auth login` first; that identity needs access to the secret. No local
+environment file is loaded automatically, and no API key is needed.
+The PostgreSQL URI must specify `sslmode=require` or stronger.
+Neither credentials nor row contents are printed.
+
+This copies all four tables, including users, routines, workouts, and the exercise
+catalog. It preserves IDs, nulls, integer flags, JSON-as-text, timestamps-as-text,
+and image-path values. It creates PostgreSQL identity sequences, checks, foreign
+keys, unique constraints, and the six application indexes. Each row is compared
+with the source before commit; sequences preserve SQLite's autoincrement high-water
+marks, including previously deleted IDs.
+
+**The destination `public` schema must be empty.** The script refuses an existing
+schema containing tables, sequences, or views; it never truncates or replaces data.
+The import is transactional and rolls back on failure. A successful run must not
+be repeated against the same database. Image uploads and cloud image-URL handling
+are separate; this script does not modify their paths or grant public bucket access.
+The application itself still needs its SQLite-to-PostgreSQL repository migration.
+
+Tests use synthetic data and an isolated local PostgreSQL server, never Neon.
+The bundled test server supports Python 3.10–3.12 (the migration script itself
+does not have that upper-version restriction):
+
+```bash
+uv run --python 3.12 --script scripts/test_migrate_database.py
+```
+
 ## Gemini connectivity diagnostic
 
 To isolate provider failures from routing and chat processing, make one harmless

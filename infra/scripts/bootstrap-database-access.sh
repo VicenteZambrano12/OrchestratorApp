@@ -25,8 +25,11 @@ if ! grep -Fxq "projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" <<< "${ROLE_NAMES}"
   gcloud iam roles create "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
     --title="Orchestrator database secret management" \
     --description="Manage the database connection secret, versions, and runtime access." \
-    --permissions=secretmanager.secrets.get,secretmanager.secrets.update,secretmanager.secrets.getIamPolicy,secretmanager.secrets.setIamPolicy,secretmanager.versions.add,secretmanager.versions.get,secretmanager.versions.access,secretmanager.versions.disable \
+    --permissions=secretmanager.secrets.get,secretmanager.secrets.update,secretmanager.secrets.getIamPolicy,secretmanager.secrets.setIamPolicy,secretmanager.versions.add,secretmanager.versions.get,secretmanager.versions.access,secretmanager.versions.disable,secretmanager.versions.enable \
     --stage=GA --quiet
+else
+  gcloud iam roles update "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
+    --add-permissions=secretmanager.versions.enable --quiet
 fi
 
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
