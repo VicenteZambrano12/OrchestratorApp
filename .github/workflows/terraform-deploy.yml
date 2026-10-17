@@ -1,4 +1,4 @@
-name: Verify Terraform State Backend
+name: Deploy GCP Infrastructure (Terraform)
 
 on:
   pull_request:
@@ -8,22 +8,24 @@ on:
 env:
   TF_WORKING_DIR: infra/environments/prod
   TF_IN_AUTOMATION: "true"
+  TF_VERSION: "1.13.5"
 
 concurrency:
   group: terraform-prod
   cancel-in-progress: false
 
 jobs:
-  verify-state:
+  build-and-plan:
     if: github.event.pull_request.merged == true && github.head_ref == 'dev'
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Authenticate to GCP (Workload Identity Federation)
         uses: google-github-actions/auth@v2
@@ -34,15 +36,15 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.13.5"
+          terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Format
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform fmt -check
+        run: terraform fmt -check -recursive ../../
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -52,6 +54,56 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform workspace list
 
-      - name: Verify state access and locking without applying
+      - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -input=false -lock-timeout=60s -no-color
+        run: terraform plan -input=false -lock-timeout=60s -out=tfplan
+
+      - name: Show Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform show -no-color tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+  apply:
+    needs: build-and-plan
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_TERRAFORM_SERVICE_ACCOUNT }}
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false -lockfile=readonly
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -lock-timeout=60s tfplan
