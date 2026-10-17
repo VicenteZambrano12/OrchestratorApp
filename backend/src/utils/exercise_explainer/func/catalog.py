@@ -1,11 +1,9 @@
 import json
 import re
-import sqlite3
 import unicodedata
-from contextlib import closing
 from difflib import SequenceMatcher
 from pathlib import Path
-from sql.progress import ProgressConnection
+from sql.SQLClient import SQLClient
 
 
 DEFAULT_DATABASE = Path(__file__).resolve().parents[5] / "database/gym_app.db"
@@ -35,15 +33,12 @@ def match_score(query: str, candidate: str) -> float:
 class ExerciseCatalog:
     def __init__(self, database_path: str | Path | None = None) -> None:
         self.path = Path(database_path) if database_path is not None else DEFAULT_DATABASE
+        self._database_path = database_path
 
     def resolve(self, names: list[str]) -> tuple[list[dict[str, object]], list[str]]:
         """Resolve every name before fetching full rows; never guess ambiguous variants."""
-        with closing(sqlite3.connect(
-            self.path.resolve().as_uri() + "?mode=ro", uri=True, factory=ProgressConnection,
-        )) as db:
-            db.progress_source = self.path.name
-            db.row_factory = sqlite3.Row
-            catalog = db.execute("SELECT id, name FROM dim_exercises ORDER BY id").fetchall()
+        with SQLClient(database_path=self._database_path) as db:
+            catalog = db.fetch_all("SELECT id, name FROM dim_exercises ORDER BY id")
             ids: list[int] = []
             unresolved: list[str] = []
             for name in names:
@@ -83,11 +78,11 @@ class ExerciseCatalog:
                 return [], unresolved
             exercises: list[dict[str, object]] = []
             for exercise_id in ids:
-                row = db.execute(
+                row = db.fetch_one(
                     "SELECT id, name, description, instructions, icon_url, "
                     "anatomy_diagram_url, media_url FROM dim_exercises WHERE id = ?",
                     (exercise_id,),
-                ).fetchone()
+                )
                 if row is None:
                     raise ValueError(f"Exercise {exercise_id} disappeared from the catalog")
                 exercise = dict(row)

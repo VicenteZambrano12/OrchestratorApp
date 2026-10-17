@@ -1,10 +1,9 @@
-import sqlite3
-from contextlib import closing
 from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from sql.SQLClient import SQLClient
 
 DATABASE_PATH = Path(__file__).resolve().parents[3] / "database/gym_app.db"
 
@@ -21,41 +20,35 @@ class UserResponse(UserRegistration):
 
 
 class UserRepository:
-    def __init__(self, path: Path = DATABASE_PATH):
+    def __init__(self, path: Path | None = None):
         self.path = path
 
-    def connect(self):
-        db = sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True)
-        db.row_factory = sqlite3.Row
-        return db
+    def connect(self) -> SQLClient:
+        return SQLClient(database_path=self.path)
 
     def list_users(self) -> list[UserResponse]:
-        with closing(self.connect()) as db, db:
+        with self.connect() as db:
             # Serialize first-use initialization so concurrent visitors share one default.
-            db.execute("BEGIN IMMEDIATE")
+            db.begin_write()
             db.execute(
                 "INSERT INTO dim_users (username) SELECT 'Jamie Davis' "
                 "WHERE NOT EXISTS (SELECT 1 FROM dim_users)"
             )
             return [
-                UserResponse(**dict(row))
-                for row in db.execute("SELECT id, username, weight_unit FROM dim_users ORDER BY id")
+                UserResponse.model_validate(row)
+                for row in db.fetch_all("SELECT id, username, weight_unit FROM dim_users ORDER BY id")
             ]
 
     def create(self, registration: UserRegistration) -> UserResponse:
-        with closing(self.connect()) as db, db:
-            try:
-                cursor = db.execute(
-                    "INSERT INTO dim_users (username, weight_unit) VALUES (?, ?)",
-                    (registration.username, registration.weight_unit),
-                )
-            except sqlite3.IntegrityError as error:
-                if db.execute(
-                    "SELECT 1 FROM dim_users WHERE username = ?", (registration.username,)
-                ).fetchone() is not None:
-                    raise HTTPException(status_code=409, detail="That username is already registered.") from error
-                raise
-            return UserResponse(id=cursor.lastrowid, **registration.model_dump())
+        with self.connect() as db:
+            row = db.fetch_one(
+                "INSERT INTO dim_users (username, weight_unit) VALUES (?, ?) "
+                "ON CONFLICT (username) DO NOTHING RETURNING id, username, weight_unit",
+                (registration.username, registration.weight_unit),
+            )
+            if row is None:
+                raise HTTPException(status_code=409, detail="That username is already registered.")
+            return UserResponse.model_validate(row)
 
 
 def get_user_repository() -> UserRepository:

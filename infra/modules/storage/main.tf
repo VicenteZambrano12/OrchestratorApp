@@ -12,3 +12,15 @@ resource "google_storage_bucket" "app_data" {
     prevent_destroy = true
   }
 }
+
+resource "google_storage_bucket_iam_member" "cloud_run_images" {
+  bucket = google_storage_bucket.app_data.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${var.cloud_run_service_account_email}"
+
+  condition {
+    title       = "read-exercise-images"
+    description = "Read only objects beneath images/; bucket listing and writes are not granted."
+    expression  = "resource.name.startsWith('projects/_/buckets/${google_storage_bucket.app_data.name}/objects/images/')"
+  }
+}

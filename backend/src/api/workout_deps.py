@@ -1,5 +1,3 @@
-import sqlite3
-from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -7,23 +5,23 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from api.DataClasses.Workout import WorkoutDay, WorkoutRequest, WorkoutResponse
-from utils.routinemaker.func.repository import DEFAULT_DATABASE
+from sql.SQLClient import SQLClient
 
 
 class WorkoutRepository:
-    def __init__(self, path: Path = DEFAULT_DATABASE):
+    def __init__(self, path: Path | None = None):
         self.path = path
 
     def days(self, user_id: int) -> list[WorkoutDay]:
         today = datetime.now(timezone.utc).date()
         start = today - timedelta(days=6)
         end = today + timedelta(days=1)
-        with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
-            if db.execute("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)).fetchone() is None:
+        with SQLClient(database_path=self.path) as db:
+            if db.fetch_one("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)) is None:
                 raise HTTPException(status_code=404, detail="The user does not exist.")
             workout_dates = {
-                row[0] for row in db.execute(
-                    "SELECT DISTINCT date(created_at) FROM fact_workout_sets "
+                row["workout_date"] for row in db.fetch_all(
+                    "SELECT DISTINCT date(created_at) AS workout_date FROM fact_workout_sets "
                     "WHERE user_id = ? AND training_id IS NOT NULL "
                     "AND date(created_at) >= ? AND date(created_at) < ?",
                     (user_id, start.isoformat(), end.isoformat()),
@@ -40,20 +38,19 @@ class WorkoutRepository:
         ]
 
     def save(self, user_id: int, workout: WorkoutRequest) -> WorkoutResponse:
-        with closing(sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True)) as db, db:
-            db.execute("PRAGMA foreign_keys = ON")
-            db.execute("BEGIN IMMEDIATE")
-            if db.execute("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)).fetchone() is None:
+        with SQLClient(database_path=self.path) as db:
+            db.begin_write()
+            if db.fetch_one("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)) is None:
                 raise HTTPException(status_code=404, detail="The user does not exist.")
-            if db.execute(
+            if db.fetch_one(
                 "SELECT 1 FROM dim_routines WHERE id = ? AND user_id = ?",
                 (workout.routine_id, user_id),
-            ).fetchone() is None:
+            ) is None:
                 raise HTTPException(status_code=422, detail="The selected routine does not belong to this user.")
             exercise_ids = {item.exercise_id for item in workout.sets}
             placeholders = ",".join("?" for _ in exercise_ids)
             known_ids = {
-                row[0] for row in db.execute(
+                row["id"] for row in db.fetch_all(
                     f"SELECT id FROM dim_exercises WHERE id IN ({placeholders})",
                     tuple(exercise_ids),
                 )

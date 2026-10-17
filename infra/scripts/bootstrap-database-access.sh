@@ -17,7 +17,7 @@ ROLE_NAMES="$(gcloud iam roles list --project="${PROJECT_ID}" --format='value(na
 if ! grep -Fxq "projects/${PROJECT_ID}/roles/${CREATE_ROLE}" <<< "${ROLE_NAMES}"; then
   gcloud iam roles create "${CREATE_ROLE}" --project="${PROJECT_ID}" \
     --title="Orchestrator secret creation" \
-    --description="Create the application database secret during Terraform deployment." \
+    --description="Create application secrets during Terraform deployment." \
     --permissions=secretmanager.secrets.create --stage=GA --quiet
 fi
 
@@ -25,8 +25,11 @@ if ! grep -Fxq "projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" <<< "${ROLE_NAMES}"
   gcloud iam roles create "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
     --title="Orchestrator database secret management" \
     --description="Manage the database connection secret, versions, and runtime access." \
-    --permissions=secretmanager.secrets.get,secretmanager.secrets.update,secretmanager.secrets.getIamPolicy,secretmanager.secrets.setIamPolicy,secretmanager.versions.add,secretmanager.versions.get,secretmanager.versions.access,secretmanager.versions.disable \
+    --permissions=secretmanager.secrets.get,secretmanager.secrets.update,secretmanager.secrets.getIamPolicy,secretmanager.secrets.setIamPolicy,secretmanager.versions.add,secretmanager.versions.get,secretmanager.versions.access,secretmanager.versions.disable,secretmanager.versions.enable \
     --stage=GA --quiet
+else
+  gcloud iam roles update "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
+    --add-permissions=secretmanager.versions.enable --quiet
 fi
 
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
@@ -38,4 +41,10 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${DEPLOYER}" \
   --role="projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" \
   --condition="title=orchestrator-database-secret,description=Manage only the production database secret and its versions,expression=resource.name == 'projects/${PROJECT_ID}/secrets/orchestratorapp-prod-database-url' || resource.name.startsWith('projects/${PROJECT_ID}/secrets/orchestratorapp-prod-database-url/') || resource.name == 'projects/31049783945/secrets/orchestratorapp-prod-database-url' || resource.name.startsWith('projects/31049783945/secrets/orchestratorapp-prod-database-url/')" \
+  --quiet
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${DEPLOYER}" \
+  --role="projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" \
+  --condition="title=orchestrator-app-json-secret,description=Manage only the production application JSON secret and its versions,expression=resource.name == 'projects/${PROJECT_ID}/secrets/orch_app_secret' || resource.name.startsWith('projects/${PROJECT_ID}/secrets/orch_app_secret/') || resource.name == 'projects/31049783945/secrets/orch_app_secret' || resource.name.startsWith('projects/31049783945/secrets/orch_app_secret/')" \
   --quiet

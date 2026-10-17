@@ -21,11 +21,12 @@ provider "google" {
 }
 
 module "storage" {
-  source        = "../../modules/storage"
-  project_id    = var.project_id
-  region        = var.region
-  bucket_name   = var.bucket_name
-  common_labels = var.common_labels
+  source                          = "../../modules/storage"
+  project_id                      = var.project_id
+  region                          = var.region
+  bucket_name                     = var.bucket_name
+  common_labels                   = var.common_labels
+  cloud_run_service_account_email = var.cloud_run_service_account_email
 }
 
 module "database" {
@@ -39,5 +40,14 @@ module "database" {
   db_user                         = "orchestrator_app"
   cloud_run_service_account_email = var.cloud_run_service_account_email
   secret_region                   = var.region
+  common_labels                   = var.common_labels
+}
+
+module "secrets" {
+  source                          = "../../modules/secrets"
+  project_id                      = var.project_id
+  secret_id                       = "orch_app_secret"
+  secret_region                   = var.region
+  cloud_run_service_account_email = var.cloud_run_service_account_email
   common_labels                   = var.common_labels
 }
