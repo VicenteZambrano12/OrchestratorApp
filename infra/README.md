@@ -41,9 +41,12 @@ The script adds bindings, preserving other applications' existing bindings:
    `VicenteZambrano12/OrchestratorApp` only on `refs/heads/main`, while retaining
    the existing provider condition.
 2. Grant `roles/iam.workloadIdentityUser` on
-   `orchestratorapp@basicrahgapp.iam.gserviceaccount.com` to these exact subjects:
-   - `repo:VicenteZambrano12/OrchestratorApp:ref:refs/heads/main`
-   - `repo:VicenteZambrano12/OrchestratorApp:environment:prod`
+   `orchestratorapp@basicrahgapp.iam.gserviceaccount.com` to the repository
+   principal set:
+   `principalSet://iam.googleapis.com/projects/31049783945/locations/global/workloadIdentityPools/github-pool/attribute.repository/VicenteZambrano12/OrchestratorApp`.
+   The provider maps `attribute.repository` to `assertion.repository` and its
+   condition restricts this repository to `main`. This avoids depending on the
+   GitHub subject string, which varies with event and environment context.
 3. Grant `roles/storage.objectAdmin` on the existing bucket with an IAM
    condition limiting object operations to `orchestrator_app/`, including
    Terraform state and lock objects.
@@ -78,7 +81,8 @@ application deployment setup, not GCS backend initialization.
 
 Create the GitHub environment `prod`, restrict its deployment branch to `main`,
 and configure reviewers if production approval is required. The workflow uses
-`environment: prod`; the OIDC subject depends on this exact name.
+`environment: prod` for environment protections; GCP trust uses the mapped
+repository claim and the provider's branch restriction.
 
 Each workflow job accessing state needs:
 
