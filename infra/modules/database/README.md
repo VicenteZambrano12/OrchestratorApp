@@ -11,9 +11,15 @@ Manager connection-secret integration. Files follow `versions.tf`,
 - PostgreSQL 16 by default.
 - One default production branch and one read/write compute. No replicas or
   additional branches/endpoints are created.
-- Both project defaults and primary compute are pinned to 0.25 CU, with
-  suspension after 300 seconds of inactivity. Project defaults alone do not
-  constrain the compute created with the project.
+- Project compute defaults are pinned to 0.25 CU. The Free plan enforces
+  suspension after 300 seconds of inactivity; Terraform must not send a
+  `suspend_timeout_seconds` override, even with the same value.
+- The `primary_compute` block is deliberately left computed: the pinned provider
+  can send an implicit timeout override when that block is configured. Check
+  the returned primary compute in the Neon console after deployment: min/max
+  0.25 CU and timeout 300 seconds. These defaults are for creation, not a
+  mechanism to resize an already existing compute. Mock tests validate the
+  configured project limits, not the actual compute returned by Neon's API.
 - At the time of implementation, the Neon Free plan includes 100 CU-hours per
   project per month, equivalent to up to 400 active hours at 0.25 CU, subject
   to the other Free-plan limits.
