@@ -1,0 +1,23 @@
+{
+	"language": {
+		"ES": "Spanish",
+		"EN": "English"
+	},
+	"subsystems": [
+		{
+			"id": "routine_maker",
+			"name": "Routine Maker",
+			"description": "Create a new gym routine, modify a saved routine or the current draft, collect missing workout requirements and exercise edits (add, remove, replace, adjust), preview database-backed exercises, and save a new routine version only after user confirmation. Route short follow-ups such as yes/save it, refusals, or answers to routine questions here when recent memory shows an ongoing routine workflow. Use this system for routine creation, editing and confirmation, not standalone exercise technique explanations or historical progress analysis."
+		},
+		{
+			"id": "exercise_explainer",
+			"name": "Exercise Explainer",
+			"description": "Explain how to perform a gym exercise when the user asks about its execution, technique, setup, movement, breathing, or common mistakes. Return step-by-step instructions and relevant safety guidance for the requested exercise. Use this system for exercise instructions, not for creating a complete routine or analyzing workout history."
+		},
+		{
+			"id": "past_routines_analyzer",
+			"name": "Past Routines Analyzer",
+			"description": "Retrieve, summarize, compare, and analyze the user's past workout routines and training history when the user asks about previous routines, completed workouts, historical performance, or progress over time. Base the response on available historical records and identify trends in exercises, weights, repetitions, training volume, and consistency. Use this system for questions about history or past routines, not for creating a new routine or explaining exercise technique."
+		}
+	]
+}

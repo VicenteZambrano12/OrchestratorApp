@@ -1,0 +1,193 @@
+import i18n from 'i18next'
+import { isExerciseList } from '../../ExplainerCard/exercise-data/exerciseData'
+import { isPastRoutinesAnalysis } from '../../PastRoutinesReport/report-data/reportData'
+import { demoPastRoutinesAnalysis } from '../../PastRoutinesReport/report-data/demoAnalysis'
+import { isRoutinePlan } from '../../RoutineMaker/routine-data/routineData'
+import { saveUserRoutine } from '../../../hooks/session/users'
+import { readChatStream } from './readChatStream'
+
+export const subsystemNames = {
+  routine_maker: 'Routine maker',
+  exercise_explainer: 'Exercise explainer',
+  past_routines_analyzer: 'Progress analyzer',
+  no_system: 'General guidance',
+}
+
+const exercise = (name, muscle, sets, reps, weight, rest = '90 sec') => ({ name, muscle, sets, reps, weight, rest, completed: false })
+
+export const initialRoutine = {
+  generated: '',
+  days: [
+    { name: 'Push', focus: 'Chest, shoulders & triceps', exercises: [
+      exercise('Barbell bench press', 'Chest', 3, '8–10', 40, '2 min'),
+      exercise('Incline dumbbell press', 'Upper chest', 3, '10–12', 16),
+      exercise('Seated shoulder press', 'Shoulders', 3, '8–10', 12),
+      exercise('Dumbbell lateral raise', 'Side delts', 3, '12–15', 6, '60 sec'),
+      exercise('Cable triceps pushdown', 'Triceps', 3, '12–15', 15, '60 sec'),
+    ] },
+    { name: 'Pull', focus: 'Back & biceps', exercises: [
+      exercise('Lat pulldown', 'Back', 3, '10–12', 35),
+      exercise('Seated cable row', 'Mid back', 3, '10–12', 30),
+      exercise('Single-arm dumbbell row', 'Lats', 3, '10–12', 16),
+      exercise('Face pull', 'Rear delts', 3, '12–15', 10, '60 sec'),
+      exercise('Dumbbell curl', 'Biceps', 3, '10–12', 8, '60 sec'),
+    ] },
+    { name: 'Legs', focus: 'Quads, hamstrings & glutes', exercises: [
+      exercise('Barbell squat', 'Quads & glutes', 3, '8–10', 40, '2 min'),
+      exercise('Romanian deadlift', 'Hamstrings', 3, '8–10', 35, '2 min'),
+      exercise('Leg press', 'Quads', 3, '10–12', 80),
+      exercise('Seated leg curl', 'Hamstrings', 3, '12–15', 25),
+      exercise('Standing calf raise', 'Calves', 3, '15–20', 20, '60 sec'),
+    ] },
+  ],
+}
+
+const demoRoutine = '### Your 3-day training week\n\n- **Monday · Push** — Chest, shoulders, and triceps\n- **Wednesday · Pull** — Back and biceps\n- **Friday · Legs** — Quads, hamstrings, and glutes\n\nStart with **3 sets per exercise**, leaving 1–2 reps in reserve. Use a weight you can control, and rest for 60–120 seconds between sets.'
+
+export const initialMessages = []
+
+export async function demoReply(query, signal) {
+  await new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Request cancelled', 'AbortError')) }
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve() }, 1100)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  if (/explain|deadlift|technique|how to do/i.test(query)) {
+    return { subsystem: 'exercise_explainer', content: '### Movement spotlight: Romanian deadlift\n\nThis is an **example explanation** for the demo. Live API can answer your specific exercise question.\n\n1. Stand tall with a soft bend in your knees and the weight close to your legs.\n2. Push your hips back, keeping your spine neutral.\n3. Lower only as far as you can maintain control, then drive your hips forward to stand.\n\n**Coach’s cue:** Think “hips back,” not “bend down.” Start light, and stop if you feel pain.' }
+  }
+  if (/progress|analy|review|last (push|pull|leg)|compar|week|history/i.test(query)) {
+    const analysis = demoPastRoutinesAnalysis(query)
+    return { subsystem: 'past_routines_analyzer', content: analysis.llm_explain, analysis }
+  }
+  if (/routine|plan|muscle|strength|schedule/i.test(query)) {
+    return { subsystem: 'routine_maker', content: 'Here’s an **illustrative starting plan**, not a personalized assessment. The demo uses the same 3-day split; live mode can tailor it to your requirements.\n\n' + demoRoutine + '\n\nSave this recommendation to your routine, then adjust the exercise targets to suit your level.', routine: demoRoutine }
+  }
+  return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain. 🌱\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
+}
+
+export async function requestChat(query, sessionId, signal, language, userId, onProgress, onResponse) {
+  const steps = []
+  const report = (step) => {
+    if (signal?.aborted) return
+    const index = steps.findIndex(({ id }) => id === step.id)
+    if (index === -1) steps.push(step)
+    else steps[index] = step
+    onProgress?.([...steps])
+  }
+  const result = await requestChatAction(
+    `${encodeURIComponent(sessionId)}/chat`,
+    { query, language, ...(userId === undefined ? {} : { user_id: userId, client_saves_routine: true }) },
+    signal, language, userId, report, onResponse,
+  )
+  result.steps = [...steps]
+  if (!result.saveRequested) return result
+  try {
+    signal?.throwIfAborted()
+    report({ id: 'routine_save', label: 'Saving your confirmed routine' })
+    const saved = await requestRoutineSave(sessionId, result.routine, result.draftId, signal, language, userId, onResponse)
+    return { ...saved, steps: [...steps] }
+  } catch (error) {
+    error.routineToSave = result
+    throw error
+  }
+}
+
+export async function requestRoutineSave(sessionId, routine, draftId, signal, language, userId, onResponse) {
+  if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
+  if (!Number.isSafeInteger(userId) || userId < 1) throw new Error('Routine user ID must be a positive integer.')
+  if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
+  if (typeof draftId !== 'string' || !draftId.trim()) throw new Error(i18n.t('The chat API returned an invalid response.'))
+  const saved = await saveUserRoutine(userId, routine, signal, { sessionId, draftId, language })
+  onResponse?.(saved, 'PUT /users/{user_id}/routine')
+  const t = i18n.getFixedT(language.toLowerCase())
+  return {
+    subsystem: 'routine_maker',
+    content: t('Saved as a new version and selected as your current routine.'),
+    routine: saved,
+    savedRoutine: { name: saved.name },
+    awaitingConfirmation: false,
+    draftId: null,
+  }
+}
+
+async function requestChatAction(path, payload, signal, language, userId, onProgress, onResponse) {
+  if (!['EN', 'ES'].includes(language)) throw new Error('Chat language must be EN or ES.')
+  if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 1)) throw new Error('Routine user ID must be a positive integer.')
+  const t = i18n.getFixedT(language.toLowerCase())
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+  const timeoutSignal = AbortSignal.timeout(90000)
+  try {
+    let response
+    try {
+      response = await fetch(`${baseUrl}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.any([signal, timeoutSignal]),
+      })
+    } catch (error) {
+      if (error instanceof TypeError) {
+        const unreachable = new Error(t('The backend could not be reached.'), { cause: error })
+        unreachable.backendDown = true
+        throw unreachable
+      }
+      throw error
+    }
+    if (!response.ok) {
+      if (response.status === 422 && response.headers.get('content-type')?.includes('application/json')) {
+        const body = await response.json()
+        if (Array.isArray(body.detail) && body.detail.every((item) => typeof item.msg === 'string')) {
+          throw new Error(`${t('The chat API returned HTTP {{status}}. Check that the backend is running and your request is valid.', { status: response.status })} ${body.detail.map((item) => item.msg).join(' ')}`)
+        }
+      }
+      const error = new Error(t('The chat API returned HTTP {{status}}. Check that the backend is running and your request is valid.', { status: response.status }))
+      error.backendDown = response.status >= 500
+      throw error
+    }
+    const data = response.headers?.get('content-type')?.includes('application/x-ndjson')
+      ? await readChatStream(response, onProgress, t)
+      : await response.json()
+    if (!data || typeof data !== 'object') throw new Error(t('The chat API returned an invalid response.'))
+    if (!Object.hasOwn(subsystemNames, data.subsystem)) throw new Error(t('The chat API returned an unknown subsystem.'))
+    onResponse?.(data, 'POST /{id}/chat')
+    if (typeof data.response === 'string') return { subsystem: data.subsystem, content: data.response }
+    if (data.subsystem === 'exercise_explainer') {
+      if (!isExerciseList(data.response)) throw new Error(t('The chat API returned an invalid exercise list.'))
+      return { subsystem: data.subsystem, content: data.response }
+    }
+    if (data.subsystem === 'past_routines_analyzer') {
+      if (!isPastRoutinesAnalysis(data.response)) throw new Error(t('The chat API returned an invalid response.'))
+      return { subsystem: data.subsystem, content: data.response.llm_explain, analysis: data.response }
+    }
+    const result = data.response
+    if (!result || typeof result.message !== 'string' ||
+      !['awaiting_confirmation', 'save_requested', 'saved', 'needs_parameters', 'needs_changes', 'needs_routine', 'no_match'].includes(result.status)) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
+    const routine = result.routine
+    if (routine !== null && !isRoutinePlan(routine)) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
+    if (['awaiting_confirmation', 'save_requested'].includes(result.status) &&
+      (!routine || typeof result.draft_id !== 'string' || !result.draft_id.trim())) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
+    if (result.status === 'saved' &&
+      (!routine || !Number.isSafeInteger(result.routine_id) || result.routine_id < 1)) {
+      throw new Error(t('The chat API returned an invalid response.'))
+    }
+    return {
+      subsystem: data.subsystem,
+      content: result.message,
+      routine,
+      savedRoutine: result.status === 'saved' ? { id: result.routine_id, name: result.routine.name } : null,
+      awaitingConfirmation: result.status === 'awaiting_confirmation',
+      saveRequested: result.status === 'save_requested',
+      routineId: result.routine_id,
+      draftId: result.draft_id,
+    }
+  } catch (error) {
+    if (timeoutSignal.aborted) throw new Error(t('The coach took too long to respond. Please try again.'), { cause: error })
+    throw error
+  }
+}

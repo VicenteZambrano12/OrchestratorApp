@@ -1,0 +1,28 @@
+export const colors = {
+  bg: '#0d0f0e',
+  bgRaised: '#121514',
+  surface: 'rgb(24 24 27 / 0.4)',
+  surfaceHover: 'rgb(24 24 27 / 0.6)',
+  surfaceSolid: '#151918',
+  border: 'rgb(255 255 255 / 0.1)',
+  borderSoft: 'rgb(255 255 255 / 0.06)',
+  borderAccent: 'rgb(16 185 129 / 0.1)',
+  borderAccentHover: 'rgb(16 185 129 / 0.2)',
+  borderAccentStrong: 'rgb(52 211 153 / 0.45)',
+  text: '#ffffff',
+  textBody: '#cbd5e1',
+  textMuted: '#94a3b8',
+  textFaint: '#71717a',
+  sage: '#8fb39a',
+  emerald400: '#34d399',
+  emerald500: '#10b981',
+  emerald600: '#059669',
+  accentSoft: 'rgb(16 185 129 / 0.12)',
+  accentGlow: 'rgb(52 211 153 / 0.28)',
+  onAccent: '#04130c',
+  danger: '#f87171',
+  dangerSoft: 'rgb(239 68 68 / 0.1)',
+  dangerBorder: 'rgb(239 68 68 / 0.3)',
+}
+
+export const toCssVarName = (key) => `--c-${key.replace(/[A-Z0-9]+/g, (m) => `-${m.toLowerCase()}`)}`

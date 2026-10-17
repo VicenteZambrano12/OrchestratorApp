@@ -1,0 +1,57 @@
+name: Verify Terraform State Backend
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+env:
+  TF_WORKING_DIR: infra/environments/prod
+  TF_IN_AUTOMATION: "true"
+
+concurrency:
+  group: terraform-prod
+  cancel-in-progress: false
+
+jobs:
+  verify-state:
+    if: github.event.pull_request.merged == true && github.head_ref == 'dev'
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_TERRAFORM_SERVICE_ACCOUNT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.5"
+
+      - name: Terraform Format
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Verify workspace listing
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform workspace list
+
+      - name: Verify state access and locking without applying
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -lock-timeout=60s -no-color

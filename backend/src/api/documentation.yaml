@@ -1,0 +1,138 @@
+title: OrchestratorApp
+summary: AI-powered gym assistance and workout orchestration.
+version: "0.1.0"
+description: |
+
+  ## Overview
+
+  OrchestratorApp routes gym-related questions to an exercise explainer, a workout
+  routine maker, or a past-routine analyzer. Answers use the requested English or
+  Spanish language. Text answers, structured routine results, and database-backed
+  exercise lists share a `response`
+  envelope. Each successful response also includes the `subsystem` ID selected
+  by the orchestrator: `routine_maker`, `exercise_explainer`,
+  `past_routines_analyzer`, or `no_system`. Questions outside the supported
+  domains receive a localized no-match answer with `subsystem: no_system` and
+  HTTP 200. Routing runs once per request.
+  `POST /{id}/chat` also supports `Accept: application/x-ndjson` for live
+  workflow progress. Each newline-delimited event has a `type`: `progress`
+  contains the executed node's `id` and short English localization key `label`;
+  SQL progress events additionally contain `kind: sql`, the executing stage's
+  `parent`, the parameterized statement template in `sql`, and the provider plus
+  database file name in `source`. SQL events omit bound values, rows, and absolute
+  database paths. They cover the history SQL client, exercise catalog, and routine
+  repository during streamed chat execution.
+  `heartbeat` keeps the connection alive; terminal `result` contains the existing
+  response envelope in `data`. Terminal `error` contains `status` (422 or 500)
+  and an optional input-error `message`. Processing errors after streaming starts
+  are in-band with HTTP 200; request validation still returns HTTP 422.
+  The default JSON response and routing behavior remain unchanged. Steps describe
+  actual workflow actions, not model chain-of-thought. Disconnecting stops
+  delivery but cannot cancel an already-running synchronous provider call.
+  Exercise lists preserve catalog values (id, name, description, instructions,
+  icon_url, anatomy_diagram_url, and two decoded media_urls) and add a localized
+  llm_explanation generated separately for each exercise. Missing or ambiguous
+  exercise names return text asking for clarification. Catalog images are served
+  at `/database/images/`; returned paths are not rewritten.
+  Past-routine analysis requires an existing numeric `user_id`. A second Gemini
+  router selects `past_day_exercise`, `compare_last_two_workouts` or
+  `weekly_performance` plus an optional `day_type` (for example push or pull),
+  reads the user's logged sets from SQLite, and returns them unchanged in `data`
+  with a generated `llm_explain`.
+  Routine Maker additionally requires an existing numeric `user_id`. It classifies
+  new routines, saved-routine edits, draft edits, and save confirmations before
+  collecting missing requirements. Its `routine` contains a list of training days
+  with day_type, info and catalog-backed exercises. Drafts return
+  `awaiting_confirmation` and are cached per session/user without writing SQLite.
+  By default, a later explicit confirmation saves a new active routine version
+  and returns `saved` with `routine_id`; previous versions remain preserved but
+  inactive. Clients can instead opt into the frontend-owned save flow described
+  below. Invalid model output is validated with up to three attempts.
+  `GET /users/{user_id}/routine` returns the active saved routine for an existing
+  user, or `null` when the user has no active routine. An unknown user returns 404.
+  Legacy plain-text active routines are read from their template workout sets
+  (`training_id IS NULL`) and combined as training days, excluding empty drafts.
+  These responses include `storage_format: legacy`, null session/rest timing,
+  and each day's original `routine_id` for workout logging. They are read-only
+  plans in the UI; create a new complete plan to change their structure.
+  If all legacy templates are empty, GET returns null. Invalid saved JSON plans
+  still return 409. Existing JSON plan responses and PUT validation are unchanged.
+  `PUT /users/{user_id}/routine` accepts that same complete routine JSON directly
+  (without a wrapper) and returns the saved routine. It validates catalog exercise
+  IDs and saves a new active version, atomically marking all previous versions for
+  that user inactive. Other users are unaffected. Invalid routines return 422;
+  an unknown user returns 404. No chat session or AI call is required.
+  Both GET and PUT include the saved version's database ID in the `X-Routine-Id`
+  response header when a routine exists, without changing the routine JSON body.
+  Cross-origin deployments must expose this header in their CORS configuration.
+  The frontend supplies `client_saves_routine: true` to chat. Explicit chat
+  confirmations then return `save_requested` without a database write. Both that
+  response and the preview's Save button use PUT with `session_id`, `draft_id`,
+  and `language` query parameters. This verifies the submitted plan against the
+  cached preview, preserves its parameters, updates chat state and memory, and
+  makes retries idempotent. Stale or mismatched drafts return 422. Clients that
+  omit the chat flag retain server-side confirmation saves.
+
+  `POST /users/{user_id}/workouts` records a completed workout, not a routine plan.
+  Its JSON body contains an owned `routine_id` and a non-empty `sets` list.
+  Each set specifies a catalog `exercise_id` and actual reps, duration_seconds,
+  or distance_meters, with optional weight and rpe (1-10). Weight uses the user's
+  configured weight unit. Exercise order follows first appearance and set numbers
+  increment per exercise. All sets are saved atomically in `fact_workout_sets`
+  with one generated `training_id` and the same server-generated UTC `created_at`.
+  HTTP 201 returns training_id, user_id, routine_id, date (YYYY-MM-DD UTC),
+  created_at, and sets_saved. Clients cannot supply a date or user ID in the body.
+  Unknown users return 404; invalid sets, unknown exercises, and routines not
+  owned by the URL user return 422 without saving any sets. Each call creates
+  a new session; active routines and other users' records remain unchanged.
+
+  `GET /users/{user_id}/days` returns a list of exactly seven UTC dates, oldest
+  first, covering today and the previous six days. Each entry contains `date`
+  (YYYY-MM-DD), `day_of_week` (full English weekday name), and `has_routine`.
+  `has_routine` is true only if the user has at least one logged workout on that
+  date (`training_id IS NOT NULL`); routine templates do not count. Days without
+  workouts are included with false, even when the user has no routines.
+  Unknown users return 404; non-positive or non-integer user IDs return 422.
+  This read-only endpoint does not call AI services.
+
+  ## Authentication and permissions
+
+  These endpoints currently require **no authentication** or authorization headers.
+  The backend, not the caller, supplies Gemini credentials through server
+  configuration. Never include provider credentials in a request body.
+
+  ## Error formats
+
+  - **422 Unprocessable Entity**: invalid chat requests return JSON with a `detail`
+    array. Each entry describes the error using `loc`, `msg`, and `type`, and may
+    include `input` and `ctx`.
+  - **500 Internal Server Error**: unhandled configuration, provider, or processing
+    failures return plain text (`Internal Server Error`) in non-debug mode, not a
+    JSON error envelope. Debug deployments may expose tracebacks.
+
+  The active-routine endpoint returns 404 when the requested user does not exist.
+  Unknown URLs use FastAPI's default 404 JSON response.
+
+  ## Operational notes
+
+  Chat requests can call Gemini and consume provider quota. Explicit conversation
+  history and previous routine state are not accepted in request bodies.
+  `POST /{id}/chat` requires a caller-supplied session ID in the URL. The ID is
+  an opaque path segment, not an authentication credential. The latest two stored
+  turns supply memory for follow-ups. Successful turns are stored in process-local
+  session memory, which is lost on restart. The former `/chat` URL is not available.
+  The health endpoint checks application availability only, not provider readiness.
+contact:
+  name: OrchestratorApp maintainers
+  url: https://github.com/VicenteZambrano12/OrchestratorApp/issues
+license_info:
+  name: Not specified; no license granted
+openapi_tags:
+  - name: Chat
+    description: >-
+      Session-aware gym assistance: route questions and return localized
+      text answers, exercise lists, or structured workout routine results.
+  - name: Health
+    description: >-
+      Application liveness checks without AI provider calls or
+      external dependency checks.

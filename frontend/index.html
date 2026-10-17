@@ -2,9 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/jpeg" href="/icon.jpeg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <meta name="theme-color" content="#F8FAFC" />
+    <script>
+      // Resolve before styles or React load so the first paint uses the saved theme.
+      (() => {
+        let preference = 'system'
+        try {
+          const saved = localStorage.getItem('form-theme')
+          if (['light', 'dark', 'system'].includes(saved)) preference = saved
+          else if (saved !== null) console.warn('Unrecognized form-theme preference:', saved)
+        } catch (error) {
+          console.error('Could not restore theme preference:', error)
+          document.documentElement.dataset.themeError = 'Could not restore your theme preference. Device storage is unavailable.'
+        }
+        const dark = preference === 'dark' ||
+          (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.dataset.themePreference = preference
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#0A0D0C' : '#F8FAFC'
+      })()
+    </script>
+    <meta name="description" content="Form — your personal AI training coach. Build a smarter routine, understand every movement, and grow stronger." />
+    <title>Form — Your personal AI coach</title>
   </head>
   <body>
     <div id="root"></div>

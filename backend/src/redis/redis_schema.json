@@ -1,0 +1,25 @@
+{
+	"description": "Template schema for conversation state stored in Redis. One Redis hash per session; each field is a turn id (auto-incremental) whose value is a JSON-encoded string of the turn.",
+	"key_pattern": "<session_id>",
+	"redis_type": "hash",
+	"field_pattern": "<turn_id>",
+	"field_notes": "turn_id is an auto-incremental integer starting at 1, calculated from numeric fields only. Non-numeric metadata is ignored.",
+	"routine_state_field": "routine_state:<user_id>",
+	"routine_state_notes": "JSON RoutineState: parameters, routine (days with day_type/info and catalog exercise references), source_routine_id, workflow, change, awaiting_confirmation, draft_id and saved_routine_id. Drafts are isolated per session and user and are not database saves. The current fakeredis backend is process-local; state is lost on restart.",
+	"value_type": "JSON string",
+	"turn_schema": {
+		"user_query": "string - message sent by the user; empty for a direct Save button action",
+		"system_response": "string - response returned by the system; routine turns contain only the message, not a serialized plan",
+		"subsystem_chosen": "string - id of the subsystem selected by the orchestrator (see config/systems.json)",
+		"routine": "object or null - only on routine_maker turns: name, summary (brief explanation, up to 600 characters), days (list of day/day_type/info/duration_minutes/exercises), recovery. Exercises contain exercise_id, name, sets, reps, rest_seconds and notes. Null before a plan exists. Never a JSON-encoded string."
+	},
+	"example": {
+		"key": "session_8f3a2c1e",
+		"type": "hash",
+		"fields": {
+			"1": "{\"user_query\": \"Create a one-day push routine\", \"system_response\": \"Your draft is ready.\", \"subsystem_chosen\": \"routine_maker\", \"routine\": {\"name\": \"Push day\", \"days\": [{\"day\": 1, \"day_type\": \"push\", \"info\": \"Warm up before training.\", \"duration_minutes\": 45, \"exercises\": [{\"exercise_id\": 1, \"name\": \"Barbell Bench Press\", \"sets\": 3, \"reps\": \"8-12\", \"rest_seconds\": 90, \"notes\": \"Use controlled technique.\"}]}], \"recovery\": \"Rest between sessions.\"}}",
+			"2": "{\"user_query\": \"How do I perform a barbell bench press?\", \"system_response\": \"1. Lie on the bench with your feet flat...\", \"subsystem_chosen\": \"exercise_explainer\"}",
+			"3": "{\"user_query\": \"How has my chest volume changed over the last month?\", \"system_response\": \"Your weekly chest volume increased by 12%...\", \"subsystem_chosen\": \"past_routines_analyzer\"}"
+		}
+	}
+}
