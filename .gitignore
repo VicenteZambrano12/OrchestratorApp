@@ -239,6 +239,14 @@ lerna-debug.log*
 !frontend/src/lib/
 
 # OS and editor-generated files at any depth
+# Terraform local data, state, plans, and generated GitHub OIDC credentials
+**/.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
+gha-creds-*.json
+
 .DS_Store
 ._*
 Thumbs.db
