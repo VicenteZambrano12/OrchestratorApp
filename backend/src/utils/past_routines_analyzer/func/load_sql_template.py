@@ -9,13 +9,17 @@ _ROUTES = ("past_day_exercise", "compare_last_two_workouts", "weekly_performance
 
 
 def load_sql_template(
-    route: PastRoutinesRouteId, templates_dir: str | Path | None = None
+    route: PastRoutinesRouteId, templates_dir: str | Path | None = None,
+    *, database_type: str = "sqlite",
 ) -> str:
-    """Return the parameterized SQLite query for a past routines route."""
+    """Return the provider's parameterized query for a past routines route."""
     if route not in _ROUTES:
         raise ValueError(f"unsupported past routines route: {route}")
     directory = SQL_TEMPLATES_DIR if templates_dir is None else Path(templates_dir)
-    sql = (directory / f"{route}.sql").read_text(encoding="utf-8")
+    if database_type not in ("sqlite", "postgresql"):
+        raise ValueError(f"unsupported SQL template provider: {database_type}")
+    suffix = ".postgresql" if database_type == "postgresql" and route == "weekly_performance" else ""
+    sql = (directory / f"{route}{suffix}.sql").read_text(encoding="utf-8")
     if not sql.strip():
         raise ValueError(f"SQL template for {route} is empty")
     return sql

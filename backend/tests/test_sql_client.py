@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from sql.SQLClient import PROJECT_ROOT, SQLClient
+from sql.SQLClient import PROJECT_ROOT, SQLClient, postgres_query
 
 
 MODULE = importlib.import_module("sql.SQLClient")
@@ -45,7 +45,7 @@ class SQLClientTests(unittest.TestCase):
         )
         with SQLClient() as client:
             self.assertEqual(client.fetch_all("SELECT * FROM items"), [])
-        with patch.dict(os.environ, {"SQL_DATABASE_TYPE": "postgresql"}):
+        with patch.dict(os.environ, {"SQL_DATABASE_TYPE": "mysql"}):
             with self.assertRaisesRegex(ValueError, "Unsupported SQL_DATABASE_TYPE"):
                 SQLClient()
             self.assertEqual(self.client(database_type="sqlite").database_type, "sqlite")
@@ -54,7 +54,7 @@ class SQLClientTests(unittest.TestCase):
             self.assertEqual(self.client().database_path, str(self.database))
 
     def test_invalid_configuration(self):
-        for provider in ("", "mysql", "postgresql"):
+        for provider in ("", "mysql"):
             with self.subTest(provider=provider):
                 with self.assertRaisesRegex(ValueError, "SQL_DATABASE_TYPE"):
                     self.client(database_type=provider)
@@ -64,6 +64,68 @@ class SQLClientTests(unittest.TestCase):
                 SQLClient()
         with self.assertRaisesRegex(ValueError, "SQLITE_DATABASE_PATH"):
             SQLClient(database_path=" ")
+
+    def test_cloud_mode_overrides_legacy_sqlite_configuration(self):
+        uri = "postgresql://demo:test-password@demo-pooler.example/app?sslmode=require"
+        self.env_file.write_text(
+            f"MODE=CLOUD\nSQL_DATABASE_TYPE=sqlite\nDATABASE_URL={uri}\n", encoding="utf-8",
+        )
+        client = SQLClient()
+        self.assertEqual(client.database_type, "postgresql")
+        self.assertEqual(client.database_path, "app")
+        with patch.dict(os.environ, {"DATABASE_URL": uri.replace("/app?", "/env?")}):
+            self.assertEqual(SQLClient().database_path, "env")
+            self.assertEqual(SQLClient(database_url=uri).database_path, "app")
+        with patch.dict(os.environ, {"MODE": "LOCAL"}):
+            self.assertEqual(SQLClient().database_type, "sqlite")
+        with patch.dict(os.environ, {"MODE": "CLOUD", "DATABASE_URL": ""}):
+            with self.assertRaisesRegex(ValueError, "DATABASE_URL"):
+                SQLClient()
+        with patch.dict(os.environ, {"MODE": "CLOUD"}):
+            self.assertEqual(self.client().database_type, "sqlite")
+            self.assertEqual(SQLClient(database_type="sqlite").database_type, "sqlite")
+
+    def test_missing_cloud_url_never_falls_back_to_sqlite(self):
+        with patch.dict(os.environ, {"MODE": "CLOUD"}):
+            with self.assertRaisesRegex(ValueError, "DATABASE_URL"):
+                SQLClient()
+        with patch.dict(os.environ, {"MODE": "typo"}):
+            with self.assertRaisesRegex(ValueError, "MODE"):
+                SQLClient()
+
+    def test_cloud_url_validation_does_not_expose_credentials(self):
+        for uri in (
+            "", " ", "sqlite:///app",
+            "postgresql://demo:private-password@host/app",
+            "postgresql://demo:private-password@host/app?sslmode=disable",
+            "postgresql://demo:private-password@host/app?sslmode=require&sslmode=disable",
+            "postgresql://demo@host/app?sslmode=require",
+            "postgresql://demo:private-password@host/?sslmode=require",
+            "postgresql://demo:private-password@[invalid/app?sslmode=require",
+        ):
+            with self.subTest(uri=uri), self.assertRaises(ValueError) as raised:
+                SQLClient(database_type="postgresql", database_url=uri)
+            self.assertNotIn("private-password", str(raised.exception))
+        for sslmode in ("require", "verify-ca", "verify-full"):
+            SQLClient(
+                database_type="postgresql",
+                database_url=f"postgresql://demo:password@host/app?sslmode={sslmode}",
+            )
+
+    def test_portable_postgres_binding_preserves_literals_and_comments(self):
+        query = (
+            "SELECT '?' AS q, ':name' AS n, '100%' AS p, 'it''s :literal', "
+            '"column:name", $$? :dollar$$, $tag$:tagged ?$tag$, '
+            ":name::text, ? -- :comment ?\n/* :block ? */ WHERE x LIKE '%' || :name || '%'"
+        )
+        expected = (
+            "SELECT '?' AS q, ':name' AS n, '100%%' AS p, 'it''s :literal', "
+            '"column:name", $$? :dollar$$, $tag$:tagged ?$tag$, '
+            "%(name)s::text, %s -- :comment ?\n/* :block ? */ "
+            "WHERE x LIKE '%%' || %(name)s || '%%'"
+        )
+        self.assertEqual(postgres_query(query), expected)
+        self.assertEqual(postgres_query("SELECT '100%', '?'"), "SELECT '100%', '?'")
 
     def test_parameterized_queries_and_committed_writes(self):
         name = "Robert'); DROP TABLE items; --"

@@ -31,7 +31,7 @@ def report_progress(node: str, label: str) -> None:
         listener({"id": node, "label": label})
 
 
-def report_sql(query: str, database: str) -> None:
+def report_sql(query: str, database: str, *, database_type: str = "sqlite") -> None:
     """Publish query templates only, never bound values or result rows."""
     listener = _listener.get()
     if listener is not None:
@@ -41,5 +41,5 @@ def report_sql(query: str, database: str) -> None:
             "kind": "sql",
             "parent": _current_node.get(),
             "sql": query,
-            "source": f"SQLite / {Path(database).name}",
+            "source": f"{'PostgreSQL' if database_type == 'postgresql' else 'SQLite'} / {Path(database).name}",
         })

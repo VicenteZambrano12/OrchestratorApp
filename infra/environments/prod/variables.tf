@@ -42,5 +42,5 @@ variable "neon_region_id" {
 
 variable "cloud_run_service_account_email" {
   type        = string
-  description = "Dedicated runtime identity with access to the database connection secret."
+  description = "Dedicated runtime identity with access to the application secrets and images."
 }

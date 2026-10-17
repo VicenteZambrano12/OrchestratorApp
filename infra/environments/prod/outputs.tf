@@ -21,3 +21,11 @@ output "neon_project_id" {
 output "database_host" {
   value = module.database.database_host
 }
+
+output "app_secret_id" {
+  value = module.secrets.secret_id
+}
+
+output "app_secret_initial_version" {
+  value = module.secrets.initial_version
+}

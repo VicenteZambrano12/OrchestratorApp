@@ -17,4 +17,6 @@ def fetch_history(
     if decision.route != "weekly_performance":
         parameters["day_type"] = decision.day_type
     with sql_client_factory() as client:
-        return client.fetch_all(load_sql_template(decision.route), parameters)
+        return client.fetch_all(
+            load_sql_template(decision.route, database_type=client.database_type), parameters,
+        )

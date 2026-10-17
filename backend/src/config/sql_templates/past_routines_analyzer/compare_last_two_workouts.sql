@@ -14,7 +14,7 @@ WITH ranked_trainings AS (
     WHERE f.user_id = :user_id
       AND f.training_id IS NOT NULL
       AND (
-          :day_type IS NULL
+          CAST(:day_type AS TEXT) IS NULL
           OR LOWER(r.name) LIKE '%' || LOWER(TRIM(:day_type)) || '%'
       )
     GROUP BY f.training_id

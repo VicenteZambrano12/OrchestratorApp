@@ -45,6 +45,7 @@ The reusable synchronous client lives in `backend/src/sql/SQLClient.py`.
 Add these settings to the repository-root `.env` (also shown in `.env.example`):
 
 ```dotenv
+MODE=LOCAL
 SQL_DATABASE_TYPE=sqlite
 SQLITE_DATABASE_PATH=database/gym_app.db
 ```
@@ -74,8 +75,8 @@ with SQLClient() as db:
 affected row counts (`-1` when unknown). `fetch_one` returns a dictionary or
 `None`; `fetch_all` returns a list of dictionaries. Use unique column names or
 aliases when selecting joined tables. Bind values through parameters rather
-than formatting them into SQL; SQL syntax and placeholders remain
-provider-specific.
+than formatting them into SQL. The client accepts `?` positional and `:name`
+named placeholders in either mode; it does not translate vendor-specific SQL.
 
 A context manager connects, commits on success, rolls back on an exception, and
 always closes. For manual lifecycle management, call `connect()`, then
@@ -84,16 +85,128 @@ discards pending writes. Use a separate client per request/thread and do not
 nest context managers on the same client. Database and configuration errors
 propagate to the caller.
 
-Only SQLite is implemented. Other `SQL_DATABASE_TYPE` values fail explicitly.
-Future providers can add a connection factory using the client's DB-API
-connection/cursor protocols without changing its query methods. Existing
-domain repositories remain SQLite-specific; this adds a reusable client rather
-than migrating their SQL dialects or persistence logic.
+### Neon / cloud mode
 
-Run the client tests without touching the application database:
+Set these repository-root `.env` settings to use the migrated Neon database:
+
+```dotenv
+MODE=CLOUD
+DATABASE_URL=postgresql://USER:PASSWORD@HOST-pooler/DBNAME?sslmode=require
+```
+
+Use the existing **pooled** URI stored in Secret Manager secret
+`orchestratorapp-prod-database-url`, not the Neon API key. For a local terminal
+authenticated to GCP, inject it without printing or saving the credential:
+
+```bash
+export DATABASE_URL="$(gcloud secrets versions access latest \
+  --secret=orchestratorapp-prod-database-url --project=basicrahgapp)"
+```
+
+On Cloud Run, inject this secret as the `DATABASE_URL` environment variable and
+set `MODE=CLOUD`. The runtime service account already has access to that secret;
+the application does not invoke `gcloud` or retrieve deployment API keys.
+
+Cloud mode overrides the legacy `SQL_DATABASE_TYPE=sqlite` setting and routes
+users, routines, workouts, exercise lookup, and history analysis through
+PostgreSQL. Missing or non-TLS URLs fail explicitly, with no SQLite fallback.
+Process environment variables override `.env`; explicit constructor types or
+SQLite fixture paths take priority for isolated tests and local tooling.
+`MODE=LOCAL` (the default) retains the SQLite configuration above. Unknown modes
+or database types are rejected. PostgreSQL connections disable persistent
+prepared statements for compatibility with Neon's pooler. Multi-statement
+repository writes use a transaction-scoped PostgreSQL advisory lock, matching
+SQLite's serialized write behavior. Returned SQL dates are ISO strings in both
+providers; progress events identify the provider without exposing its URL.
+
+The PostgreSQL integration suite uses a temporary local server and synthetic
+data. Only the cloud connection destination is redirected; SQL and transactions
+run against real PostgreSQL. It never connects to Neon:
+
+```bash
+uv run --python 3.12 --script scripts/test_cloud_database.py
+```
+
+Run the SQLite client tests without touching the application database:
 
 ```bash
 PYTHONPATH=backend/src:backend/tests uv run --project backend --locked python -m unittest test_sql_client -v
+```
+
+## Application JSON secret
+
+The reusable [secrets module](infra/modules/secrets) provisions
+`orch_app_secret` in GCP Secret Manager, replicated in Madrid
+(`europe-southwest1`). Its initial version contains exactly `{}`. No values from
+the local environment file are copied, and the existing Neon connection secret
+is unchanged.
+
+The dedicated runtime service account receives `roles/secretmanager.secretAccessor`
+on this secret only. Before the next production Terraform deployment, rerun the
+existing bootstrap as an administrator to authorize the deployer to manage the
+new secret:
+
+```bash
+bash infra/scripts/bootstrap-database-access.sh
+```
+
+Then use the existing plan / production approval / apply workflow. This adds no
+new GitHub secret or variable.
+
+Later, add populated JSON as a **new version** in Secret Manager rather than
+putting credentials in Terraform or committing them to the repository. Terraform
+manages only the empty seed version; later versions are not overwritten by
+routine applies, and a disabled seed remains disabled. Use `latest` when reading
+the populated secret, not the `app_secret_initial_version` output. The secret
+contents are not yet loaded into the application automatically.
+
+## Image storage
+
+Images keep their existing `/database/images/...` URLs in both modes, so neither
+database paths nor frontend code need rewriting:
+
+- `MODE=LOCAL` serves the repository's `database/images` directory.
+- `MODE=CLOUD` serves images through the backend from the private GCS bucket.
+  `/database/images/media/example/0.jpg` reads
+  `gs://orch_app_bucket/images/media/example/0.jpg`. There is no local fallback.
+
+The optional `.env`/process setting `GCS_IMAGES_BUCKET` defaults to
+`orch_app_bucket`. The backend uses **Application Default Credentials**, not a
+Neon key or a signed/public bucket URL. On Cloud Run, use the existing
+`orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com` runtime identity.
+For local cloud-mode development, configure ADC once:
+
+```bash
+gcloud auth application-default login
+```
+
+If the Google SDK cannot determine the project, export
+`GOOGLE_CLOUD_PROJECT=basicrahgapp` in the backend process environment.
+
+The storage Terraform module grants that identity object-viewer access
+conditioned on the `images/` prefix only. The condition does not grant bucket
+listing, writes, deletion, or access to other prefixes; public access prevention
+remains enforced. The deployer needs bucket IAM read/update permissions to manage
+the new binding. Run the updated bootstrap once as an administrator, then use the
+existing plan / production approval / apply workflow:
+
+```bash
+bash infra/scripts/bootstrap-storage-access.sh
+```
+
+These infrastructure changes must be applied before the Cloud Run runtime can
+read images. Upload images using the previously supplied migration script if
+the bucket is still empty; image requests do not upload anything.
+
+Cloud image responses support GET, HEAD, ETag/Last-Modified revalidation, and
+object cache-control metadata (defaulting to one hour of browser caching).
+Missing images return 404. Credential, permission, and GCS service failures are
+logged and return 503 rather than silently loading local files.
+
+Run the isolated image-serving tests without GCP credentials:
+
+```bash
+PYTHONPATH=backend/src:backend/tests uv run --project backend --locked python -m unittest test_image_files -v
 ```
 
 ## Populate Neon from SQLite

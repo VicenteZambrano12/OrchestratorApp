@@ -140,7 +140,7 @@ def chat(
     previous versions are preserved but deactivated. The direct routine/save
     endpoint confirms a preview without routing or LLM calls.
     With `client_saves_routine: true`, confirmation instead returns
-    `save_requested` with the routine and draft ID without writing SQLite.
+    `save_requested` with the routine and draft ID without writing to the database.
     The client completes the save through `PUT /users/{user_id}/routine`.
 
     **Side effects:** routing and selected systems may call Gemini and consume
