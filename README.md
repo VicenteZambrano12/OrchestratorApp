@@ -77,8 +77,7 @@ rules, or image-workflow changes trigger a build tagged with the merge commit
 SHA. An already-published SHA is reused on a retry. Infrastructure-only PRs reuse
 the newest image digest; an empty repository always triggers the initial build.
 The selected immutable digest is passed as `app_container_image` into Terraform
-and exposed as an output for the upcoming Cloud Run integration. This step
-does not create or deploy Cloud Run.
+and deployed to Cloud Run only after approval of the saved plan.
 
 After publishing/resolving the image, CI deletes older versions of this exact
 image package and verifies **at most two newest versions remain**. It never
@@ -96,6 +95,50 @@ newly pushed image, matching the example's build-before-approval workflow.
 ```bash
 python3 -m unittest discover -s scripts -p test_registry_images.py -v
 ```
+
+## Production Cloud Run deployment
+
+`infra/modules/cloudrun` deploys the combined image as `orchestratorapp-prod`
+in Madrid (`europe-southwest1`). The website is public; existing application
+authentication continues to protect user features. The service runs as
+`orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com`, not the CI deployer.
+No VPC connector, Qdrant VM, or additional database is needed.
+
+Bootstrap deployment permissions once as an administrator:
+
+```bash
+bash infra/scripts/bootstrap-cloudrun-access.sh
+```
+
+CI receives a custom role for service creation and operation status reads at the
+project level (creation is authorized on the parent project). Service read,
+update, and IAM-policy access are conditioned on this app's exact service name.
+`roles/iam.serviceAccountUser` is bound on the runtime identity only. No service
+deletion permission, broad Cloud Run Admin role, or new GitHub secrets are added.
+The existing Cloud Run service agent handles image pulls from the same project.
+
+Commit and merge a `dev` → `main` PR, inspect the saved Terraform plan, and approve
+the `prod` environment. Terraform deploys the selected immutable image and routes
+100% of traffic to the new revision. CI then checks service/revision readiness,
+the configured image digest, `/api/health`, and the frontend root. Terraform's
+`cloud_run_url` output contains the production URL. A failed post-deployment
+check fails the workflow; it does not automatically roll back.
+
+The JSON secret is mounted read-only at `/var/secrets/orch_app_secret.json`.
+The module explicitly uses second-generation execution and mode `0444` so the
+non-root container can read the root-owned secret volume. `app_secret_version`
+defaults to the populated version `2`, not the empty Terraform seed version `1`.
+After adding a new JSON version through the CLI, update `app_secret_version`
+in `infra/environments/prod/terraform.tfvars` and deploy through the workflow.
+The complete JSON never becomes a Terraform input or a printed workflow value.
+
+Demo defaults are one CPU, 512 MiB memory, request-based CPU allocation,
+minimum zero instances, and maximum one at service and revision level.
+Startup/liveness probes use `/api/health`; they do not test database or Gemini
+availability. Scale-to-zero reduces idle compute cost but is not a guarantee of
+a zero bill. In-memory sessions can reset after idle shutdown, restart, or
+deployment. A rollout can temporarily overlap instances; the limit is not a
+replacement for a shared session store. Service deletion is protected.
 
 ## Combined frontend/backend container
 
@@ -123,8 +166,8 @@ unprefixed routes remain unchanged.
 
 The image defaults to `MODE=CLOUD`. Supply the runtime environment variables
 directly, or mount the populated `orch_app_secret` JSON as a **read-only file**
-and set `APP_SECRETS_FILE` to its path. For the upcoming Cloud Run deployment,
-mount the secret at `/var/secrets/orch_app_secret.json` and set:
+and set `APP_SECRETS_FILE` to its path. The Cloud Run deployment
+mounts the secret at `/var/secrets/orch_app_secret.json` and sets:
 
 ```text
 APP_SECRETS_FILE=/var/secrets/orch_app_secret.json
@@ -134,7 +177,7 @@ The entry point loads the JSON before importing the backend. Explicit process
 environment values take precedence over JSON values. Invalid/missing configured
 files fail startup without printing credentials. The application uses its runtime
 service account for GCS; do not include a service-account key file in the image.
-This Dockerfile does not deploy Cloud Run or change Terraform.
+Building this Dockerfile alone does not deploy Cloud Run.
 
 For a local Docker run with an existing, securely stored runtime JSON file
 readable by container UID `10001`:

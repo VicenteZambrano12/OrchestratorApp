@@ -65,3 +65,16 @@ module "secrets" {
   cloud_run_service_account_email = var.cloud_run_service_account_email
   common_labels                   = var.common_labels
 }
+
+module "cloudrun" {
+  source                = "../../modules/cloudrun"
+  project_id            = var.project_id
+  region                = var.region
+  app_container_image   = var.app_container_image
+  service_account_email = var.cloud_run_service_account_email
+  secret_id             = module.secrets.secret_id
+  secret_version        = var.app_secret_version
+  common_labels         = var.common_labels
+
+  depends_on = [module.secrets, module.storage, module.database]
+}

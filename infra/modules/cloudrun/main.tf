@@ -1,33 +1,37 @@
 resource "google_cloud_run_v2_service" "backend" {
-  name                = "basicragapp-backend"
+  project             = var.project_id
+  name                = var.service_name
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
-  deletion_protection = false
+  deletion_protection = true
 
-  labels = merge(var.common_labels, { component = "backend" })
+  labels = merge(var.common_labels, { component = "app" })
+
+  scaling {
+    max_instance_count = 1
+  }
 
   template {
-    service_account = var.service_account_email
+    service_account                  = var.service_account_email
+    execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"
+    max_instance_request_concurrency = 8
+    timeout                          = "300s"
 
-    # No Redis is wired up, so session state lives in fakeredis: an in-memory
-    # cache local to a single process. Pin to exactly one instance so every
-    # request is served by the same process and the cache is actually shared.
     scaling {
-      min_instance_count = 1
+      min_instance_count = 0
       max_instance_count = 1
     }
 
     containers {
       image = var.app_container_image
 
-      env {
-        name  = "QDRANT_HOST"
-        value = var.qdrant_internal_ip
+      ports {
+        container_port = 8080
       }
 
       env {
-        name  = "QDRANT_PORT"
-        value = "6333"
+        name  = "MODE"
+        value = "CLOUD"
       }
 
       env {
@@ -36,49 +40,73 @@ resource "google_cloud_run_v2_service" "backend" {
       }
 
       env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.region
+        name  = "APP_SECRETS_FILE"
+        value = "/var/secrets/orch_app_secret.json"
       }
 
-      # Single worker so fakeredis's in-memory cache (no real Redis configured) is
-      # shared by every request instead of being split across sibling processes.
-      env {
-        name  = "MAX_WORKERS"
-        value = "1"
+      volume_mounts {
+        name       = "app-secrets"
+        mount_path = "/var/secrets"
       }
 
-      env {
-        name = "APP_SECRETS_JSON"
-        value_source {
-          secret_key_ref {
-            secret  = var.secret_id
-            version = "latest"
-          }
-        }
-      }
-
-      # Default 512Mi was getting OOM-killed by the ML/genai import stack across gunicorn workers.
       resources {
+        cpu_idle          = true
+        startup_cpu_boost = false
         limits = {
-          cpu    = "2"
-          memory = "2Gi"
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 5
+        period_seconds        = 10
+        failure_threshold     = 24
+        http_get {
+          path = "/api/health"
+          port = 8080
+        }
+      }
+
+      liveness_probe {
+        timeout_seconds   = 5
+        period_seconds    = 30
+        failure_threshold = 3
+        http_get {
+          path = "/api/health"
+          port = 8080
         }
       }
     }
 
-    vpc_access {
-      network_interfaces {
-        subnetwork = var.serverless_subnet_id
+    volumes {
+      name = "app-secrets"
+      secret {
+        secret = var.secret_id
+        items {
+          version = var.secret_version
+          path    = "orch_app_secret.json"
+          mode    = 292
+        }
       }
-      egress = "PRIVATE_RANGES_ONLY"
     }
+  }
+
+  traffic {
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    percent = 100
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
-resource "google_cloud_run_service_iam_member" "public_access" {
+resource "google_cloud_run_v2_service_iam_member" "public_access" {
   location = google_cloud_run_v2_service.backend.location
   project  = var.project_id
-  service  = google_cloud_run_v2_service.backend.name
+  name     = google_cloud_run_v2_service.backend.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

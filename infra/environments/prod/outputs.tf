@@ -37,3 +37,8 @@ output "artifact_registry_repository_url" {
 output "app_container_image" {
   value = var.app_container_image
 }
+
+output "cloud_run_url" {
+  description = "Public production frontend and same-origin /api endpoint."
+  value       = module.cloudrun.cloud_run_url
+}
