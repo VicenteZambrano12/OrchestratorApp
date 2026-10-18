@@ -11,6 +11,10 @@ MANAGE_ROLE="orchestratorCloudRunManager"
 
 gcloud services enable run.googleapis.com --project="${PROJECT_ID}" --quiet
 
+# Service-scoped IAM requires the service to exist, including after a partial apply.
+gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" \
+  --region="${REGION}" --format='value(metadata.name)'
+
 ROLE_NAMES="$(gcloud iam roles list --project="${PROJECT_ID}" --format='value(name)')"
 for ROLE in "${CREATE_ROLE}" "${MANAGE_ROLE}"; do
   if [[ "${ROLE}" == "${CREATE_ROLE}" ]]; then
@@ -34,11 +38,11 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${DEPLOYER}" \
   --role="projects/${PROJECT_ID}/roles/${CREATE_ROLE}" --condition=None --quiet
 
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
+  --project="${PROJECT_ID}" --region="${REGION}" \
   --member="serviceAccount:${DEPLOYER}" \
   --role="projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" \
-  --condition="title=orchestrator-cloud-run,description=Manage only the production app service,expression=resource.name == 'projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}' || resource.name == 'projects/31049783945/locations/${REGION}/services/${SERVICE_NAME}'" \
-  --quiet
+  --condition=None --quiet
 
 gcloud iam service-accounts add-iam-policy-binding "${RUNTIME}" \
   --project="${PROJECT_ID}" --member="serviceAccount:${DEPLOYER}" \

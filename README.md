@@ -104,7 +104,8 @@ authentication continues to protect user features. The service runs as
 `orchestratorapp-runtime@basicrahgapp.iam.gserviceaccount.com`, not the CI deployer.
 No VPC connector, Qdrant VM, or additional database is needed.
 
-Bootstrap deployment permissions once as an administrator:
+Configure deployment permissions on the existing service once as an administrator
+(this also works when an earlier apply created the service but failed afterward):
 
 ```bash
 bash infra/scripts/bootstrap-cloudrun-access.sh
@@ -112,7 +113,9 @@ bash infra/scripts/bootstrap-cloudrun-access.sh
 
 CI receives a custom role for service creation and operation status reads at the
 project level (creation is authorized on the parent project). Service read,
-update, and IAM-policy access are conditioned on this app's exact service name.
+update, and IAM-policy access are bound directly on this app's service, not
+through a project-level resource-name condition. The script requires the service
+to exist and fails explicitly if it does not; it does not create a placeholder.
 `roles/iam.serviceAccountUser` is bound on the runtime identity only. No service
 deletion permission, broad Cloud Run Admin role, or new GitHub secrets are added.
 The existing Cloud Run service agent handles image pulls from the same project.
