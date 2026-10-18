@@ -217,3 +217,32 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -input=false -lock-timeout=60s tfplan
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify production deployment
+        env:
+          EXPECTED_IMAGE: ${{ needs.build-and-plan.outputs.image }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          URL="$(terraform output -raw cloud_run_url)"
+          SERVICE="$(gcloud run services describe orchestratorapp-prod \
+            --project="$PROJECT_ID" --region="$REGION" --format=json)"
+          EXPECTED_IMAGE="$EXPECTED_IMAGE" python3 -c '
+          import json, os, sys
+          service = json.load(sys.stdin)
+          status = service["status"]
+          if not any(c["type"] == "Ready" and c["status"] == "True" for c in status["conditions"]):
+              raise SystemExit("Cloud Run service is not ready.")
+          if status["latestReadyRevisionName"] != status["latestCreatedRevisionName"]:
+              raise SystemExit("The new Cloud Run revision is not ready.")
+          if service["spec"]["template"]["spec"]["containers"][0]["image"] != os.environ["EXPECTED_IMAGE"]:
+              raise SystemExit("Cloud Run is not configured with the planned application image.")
+          ' <<< "$SERVICE"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            --retry-all-errors --max-time 60 "${URL}/api/health" \
+            | python3 -c 'import json,sys; body=json.load(sys.stdin); assert body == {"status": "ok"}, "Unexpected health response"'
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            --retry-all-errors --max-time 60 "${URL}/" --output /dev/null
+          echo "Production frontend and backend verified: $URL"

@@ -53,6 +53,21 @@ variable "artifact_registry_repository_id" {
 
 variable "app_container_image" {
   type        = string
-  description = "Immutable application image selected by the build-and-plan workflow, ready for Cloud Run wiring."
-  default     = null
+  description = "Immutable application image selected by the build-and-plan workflow."
+
+  validation {
+    condition     = can(regex("^${var.region}-docker\\.pkg\\.dev/${var.project_id}/${var.artifact_registry_repository_id}/orchestratorapp@sha256:[0-9a-f]{64}$", var.app_container_image))
+    error_message = "app_container_image must be a sha256 digest in the dedicated production application repository."
+  }
+}
+
+variable "app_secret_version" {
+  type        = string
+  description = "Populated orch_app_secret JSON version; update after CLI rotation to deploy a new revision."
+  default     = "2"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.app_secret_version))
+    error_message = "app_secret_version must be a positive numeric Secret Manager version."
+  }
 }
