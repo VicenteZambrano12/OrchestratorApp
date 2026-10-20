@@ -185,3 +185,69 @@ The [Pydantic routing model](backend/src/utils/orch/dataclass/models.py) validat
 The [routing helper](backend/src/utils/orch/func/route.py) logs rejected selections and repeats the LLM consultation with the same routing context, allowing **three attempts in total**. If all three fail validation, it raises an error rather than silently selecting a subsystem. Provider or configuration failures also propagate as errors; they are not converted into a no-match response.
 
 A valid `no_system` selection is different from a routing failure. In that case, the pipeline returns a predefined message from the [fallback configuration](backend/src/config/prompts/nosystem/nosystem.yaml) in the requested language, without another LLM call. The message explains that the application supports routine creation, exercise explanations, and past-routine analysis.
+
+### 5.2 Routine Maker
+
+When the orchestrator selects `routine_maker`, the subsystem loads the user's session-scoped workflow state, saved routines, and exercise catalog. It uses separate LLM stages to identify the requested action, collect missing information, and generate or update a routine. The following flow focuses on **creating a new routine**.
+
+#### Collecting and Validating Requirements
+
+The first LLM call classifies the turn and extracts the requirements explicitly supplied by the user. Its JSON response includes the action (`create`, `update_saved`, `update_draft`, `save`, or `no_match`), extracted parameters, and any requested exercise changes.
+
+For routine creation, the required parameters are:
+
+| Parameter | Accepted values | Purpose |
+|-----------|-----------------|---------|
+| `routine_type` | `weider` or `ppl` | Select the workout split: Weider or push/pull/legs. |
+| `days_per_week` | Integer from 1 to 7 | Define the number of training days. |
+| `hours_per_session` | Positive number, at most 24 | Limit the available time per session; user-supplied minutes are converted to hours. |
+| `level` | `beginner`, `intermediate`, or `advanced` | Adapt the routine and filter eligible exercises. |
+
+The backend validates the JSON with Pydantic **before checking whether requirements are complete**. Invalid structured output is retried with validation feedback, for **three attempts in total**. Valid requirements are merged into the cached workflow so users can provide them across multiple turns; missing values are not replaced with invented defaults.
+
+If any required parameter is still absent, routine generation pauses. A separate LLM call asks only for the missing information in the requested language, and the backend returns `status: needs_parameters`. The next user reply resumes the workflow using the stored requirements.
+
+#### Generating and Validating the Routine
+
+Once all requirements are available, the backend retrieves exercises from the database at or below the user's experience level. The generation LLM receives this catalog, the collected parameters, accumulated user requests, the routine JSON schema, and the [Routine Maker instructions](backend/src/config/prompts/routinemaker/routinemaker.yaml).
+
+These instructions require the model to respect the selected split, training frequency, session time, user preferences, and safety guidance. **Only exercises from the supplied database catalog may be selected.** The generated JSON contains:
+
+- **Routine:** `name`, `summary` explaining the plan, `days`, and `recovery` guidance.
+- **Each training day:** `day`, `day_type`, `info` containing warm-up/focus guidance, `duration_minutes`, and `exercises`.
+- **Each exercise:** `exercise_id`, `name`, `sets`, `reps`, `rest_seconds`, and `notes`. The backend fills exercise names from the catalog rather than trusting model-generated names. Time or distance targets can be represented in `reps`, with clarification in `notes`; generated plans do not prescribe weights.
+
+The [Pydantic models](backend/src/utils/routinemaker/dataclass/models.py) validate the plan's structure and constraints, including the required number of consecutive training days, session duration limits, valid sets and rest intervals, catalog membership, and no duplicate exercise IDs within a day. Invalid plans receive validation feedback and are regenerated, again with **three attempts in total**. Exhausted validation retries raise an error; provider failures are not silently converted into a preview.
+
+#### Returning the Preview
+
+The validated routine is cached as an **unsaved draft** with a unique `draft_id`. The API sends the frontend a `routine_maker` response containing `status: awaiting_confirmation`, the collected `parameters`, a localized `message`, the structured `routine`, and the `draft_id`. The `routine_id` remains null until persistence succeeds.
+
+The user can review the preview, request changes, or explicitly confirm saving. Generation alone does not save or activate a routine. Confirmation persists a new version and makes it the current routine; the direct save endpoint confirms the cached draft without another LLM call.
+
+```mermaid
+flowchart TD
+    A["Routine Maker: query + language + session/user context"] --> B["Load workflow state, saved routines and catalog"]
+    B --> C["LLM: classify action and extract requirements"]
+    C --> D{"Pydantic: valid decision JSON?"}
+    D -->|No, attempts remain| C
+    D -->|No, third attempt fails| X["Error"]
+    D -->|Yes, create action| E["Merge requirements with cached state"]
+    E --> F{"All four parameters available?"}
+    F -->|No| G["LLM: ask only for missing parameters"]
+    G --> H["Cache state; return needs_parameters"]
+    H --> I["User supplies missing information"]
+    I --> A
+    F -->|Yes| J["Retrieve level-appropriate database exercises"]
+    J --> K["LLM: generate routine JSON using catalog and instructions"]
+    K --> L{"Validate schema, catalog IDs and plan constraints"}
+    L -->|No, attempts remain| K
+    L -->|No, third attempt fails| X
+    L -->|Yes| M["Cache unsaved draft with draft_id"]
+    M --> N["Frontend: structured preview, awaiting_confirmation"]
+    N --> O{"User decision"}
+    O -->|Request changes| P["Routine update workflow"]
+    O -->|Confirm save| Q["Persist new active routine version"]
+```
+
+The stage coordination, retry loops, and confirmation handling are implemented in the [Routine Maker workflow](backend/src/utils/routinemaker/func/handle.py).
