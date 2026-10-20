@@ -95,3 +95,93 @@ OrchestratorApp/
 |-- uv.lock                         # Root Python dependency lockfile
 `-- README.md
 ```
+
+## 4. Technology Stack Used
+
+### 4.1 Backend
+
+The backend uses **Python** and **FastAPI**. Rather than relying on an agent orchestration framework, it uses custom Python classes to make API calls, integrate agents, and coordinate task execution.
+
+- **Pydantic** validates structured LLM outputs.
+- **Google's Gemini API**, accessed through Google AI Studio, provides the models used by the AI systems.
+- **uv** creates the virtual environment and manages Python dependencies.
+
+### 4.2 Frontend
+
+The frontend uses **React**, with **Vite** and its React plugin for development and builds, and **Tailwind CSS** for styling.
+
+The **UI/UX Pro Max skill**, used with Claude, supported the interface design process to improve usability and the overall user experience.
+
+### 4.3 Infrastructure
+
+The infrastructure uses **Terraform** for Infrastructure as Code (IaC), **Docker** for containerization, and **GitHub Actions** for automated infrastructure and application deployment.
+
+The deployment combines Google Cloud Platform (GCP) services with a Neon database:
+
+- **Cloud Run** hosts a single container image containing both the frontend and backend.
+- **Artifact Registry** stores the application's container images.
+- **Neon PostgreSQL**, using a free subscription for this demo, provides the production SQL database.
+- **Google Cloud Storage** provides a bucket for exercise images.
+- **Secret Manager** stores application secrets and database connection credentials.
+
+## 5. How the Agent System Works
+
+When the frontend sends a user query and response language to `POST /{id}/chat`, the backend starts the agent pipeline. The session `id` provides conversation context; routine creation and history analysis also require a `user_id`.
+
+The **orchestrator runs first** to identify the user's intent. It selects a subsystem, but does not execute it or answer the question itself. The **pipeline** then invokes only the selected subsystem and returns its response.
+
+```mermaid
+flowchart TD
+    A["User query + language (EN or ES)"] --> B["Chat API"]
+    B --> C["Pipeline: load recent session turns"]
+    C --> D["Orchestrator: select a routing ID"]
+    E["systems.json: subsystem IDs and descriptions"] --> D
+    D --> F{"Pydantic: is the ID allowed?"}
+    F -->|Yes| G{"Selected ID"}
+    F -->|No, attempts remain| D
+    F -->|No, three attempts exhausted| H["Routing error"]
+    G -->|routine_maker| I["Routine Maker"]
+    G -->|exercise_explainer| J["Exercise Explainer"]
+    G -->|past_routines_analyzer| K["Past Routines Analyzer"]
+    G -->|no_system| L["Configured fallback in EN or ES"]
+    I --> M["Pipeline: store successful turn"]
+    J --> M
+    K --> M
+    L --> M
+    M --> N["API response: subsystem + response"]
+```
+
+The selected subsystem receives the original query and requested language, along with the context it needs. For example, Routine Maker uses session/user-scoped draft state, while the exercise and history systems can use recent conversation turns. Successful turns are stored for subsequent follow-ups; the chat endpoint currently supplies the latest two turns to the pipeline.
+
+The main entry points are the [chat endpoint](backend/src/api/Endpoint/chat.py) and the [Pipeline](backend/src/systems/pipeline/Pipeline.py). The default API response contains `subsystem` and `response`; clients can also request an NDJSON stream containing progress events and a terminal result or error.
+
+### 5.1 First Step: The Orchestrator
+
+The [Orchestrator](backend/src/systems/orch/Orchestrator.py) receives the user query and uses [systems.json](backend/src/config/systems.json) as its default catalog of available systems. The configuration contains:
+
+- **A language map:** `ES` means Spanish and `EN` means English.
+- **Subsystem definitions:** each has an `id`, a name, and a description explaining when it should be selected.
+
+The three configured subsystems are:
+
+| Routing ID | Responsibility |
+|------------|----------------|
+| `routine_maker` | Create or modify workout routines and handle routine-workflow follow-ups and confirmations. |
+| `exercise_explainer` | Explain exercise execution, technique, setup, and common mistakes. |
+| `past_routines_analyzer` | Retrieve and analyze past routines, logged workouts, and training progress. |
+
+The language map documents the supported languages; the routing code validates `EN` and `ES` explicitly. The LLM receives the selected language code, not the entire language map.
+
+#### Instructions and LLM Context
+
+The [orchestrator prompt](backend/src/config/prompts/orchestrator/orchestrator.yaml) supplies the routing instructions as a separate system message. The user message contains a JSON payload with the original `query`, the configured `subsystems`, the requested `language`, and recent conversation `memory` when available.
+
+The instructions tell the LLM to compare the query's intent with the subsystem descriptions and return **exactly one plain-text routing ID**. It must not answer the query, invoke a subsystem, return JSON, or add an explanation. For an unsupported request, it must return the reserved ID `no_system`.
+
+#### Validation, Retries, and Fallback
+
+The [Pydantic routing model](backend/src/utils/orch/dataclass/models.py) validates the returned value as a strict string belonging to the configured subsystem IDs or `no_system`. Extra text, an invented ID, or any other invalid selection is rejected.
+
+The [routing helper](backend/src/utils/orch/func/route.py) logs rejected selections and repeats the LLM consultation with the same routing context, allowing **three attempts in total**. If all three fail validation, it raises an error rather than silently selecting a subsystem. Provider or configuration failures also propagate as errors; they are not converted into a no-match response.
+
+A valid `no_system` selection is different from a routing failure. In that case, the pipeline returns a predefined message from the [fallback configuration](backend/src/config/prompts/nosystem/nosystem.yaml) in the requested language, without another LLM call. The message explains that the application supports routine creation, exercise explanations, and past-routine analysis.
