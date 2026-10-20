@@ -32,6 +32,12 @@ const plan = {
 
 before(async () => {
   window = new Window({ url: 'http://localhost' })
+  const matchMedia = window.matchMedia.bind(window)
+  window.matchMedia = (query) => {
+    const media = matchMedia(query)
+    if (query.includes('prefers-reduced-motion')) Object.defineProperty(media, 'matches', { value: true })
+    return media
+  }
   for (const [key, value] of Object.entries({
     window, document: window.document, navigator: window.navigator,
     localStorage: window.localStorage, FormData: window.FormData,
@@ -93,6 +99,15 @@ function button(text, scope = document) {
  */
 async function click(text, scope) {
   await act(async () => button(text, scope).click())
+  await settleDialogExit()
+}
+
+async function settleDialogExit() {
+  const deadline = Date.now() + 1000
+  while (document.querySelector('dialog[inert]') && Date.now() < deadline) {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 16)))
+  }
+  assert.equal(Boolean(document.querySelector('dialog[inert]')), false, 'Dialog exit did not settle')
 }
 
 /**
@@ -218,6 +233,7 @@ test('Done editing asks before PUT; cancel preserves edits; confirmation saves e
   assert.equal(puts.length, 1)
   assert.ok(document.querySelector('dialog[open]'))
   await act(async () => finishSave())
+  await settleDialogExit()
   assert.equal(document.querySelector('dialog'), null)
   assert.ok(button('Edit workout'))
   assert.match(document.querySelector('.save-message').textContent, /Routine updated and selected as your active routine/)

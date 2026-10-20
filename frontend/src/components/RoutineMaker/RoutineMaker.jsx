@@ -68,18 +68,20 @@ export default function RoutineMaker({ routine, onExplainExercise }) {
     <section className="routine-maker-day" id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-day-${activeDay}`}>
       <p>{day.info}</p>
       <div className="routine-maker-table-scroll">
-        <table>
+        <table role="table">
           <caption>{t('workoutDay', { day: day.day_type })}</caption>
-          <thead><tr><th scope="col">{t('EXERCISE')}</th><th scope="col">{t('SETS')}</th><th scope="col">{t('REPS')}</th><th scope="col">{t('Rest')}</th></tr></thead>
-          <tbody>{day.exercises.map((exercise, index) => <tr key={exercise.exercise_id}>
-            <th scope="row"><div className="routine-maker-exercise">
+          <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">{t('EXERCISE')}</th><th role="columnheader" scope="col">{t('SETS')}</th><th role="columnheader" scope="col">{t('REPS')}</th><th role="columnheader" scope="col">{t('Rest')}</th></tr></thead>
+          <tbody role="rowgroup">{day.exercises.map((exercise, index) => <tr role="row" key={exercise.exercise_id}>
+            <th role="rowheader" scope="row"><div className="routine-maker-exercise">
               <span className="routine-maker-number">{String(index + 1).padStart(2, '0')}</span>
               <div><strong>{exercise.name}</strong>{exercise.notes && <p>{exercise.notes}</p>}</div>
               {onExplainExercise && <button type="button" className="icon-button"
                 aria-label={t('Explain {{exercise}}', { exercise: exercise.name })}
                 onClick={() => onExplainExercise(exercise.name)}><HelpCircle size={17} aria-hidden="true" /></button>}
             </div></th>
-            <td>{exercise.sets}</td><td>{exercise.reps}</td><td>{exercise.rest_seconds}s</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('SETS')}</span>{exercise.sets}</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('REPS')}</span>{exercise.reps}</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('Rest')}</span>{exercise.rest_seconds}s</td>
           </tr>)}</tbody>
         </table>
       </div>

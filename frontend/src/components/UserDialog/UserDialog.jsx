@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { listUsers, registerUser } from '../../hooks/session/users'
+import AdaptiveDialog from '../AdaptiveDialog/AdaptiveDialog'
 
 /**
  * Displays existing profiles and registration with recoverable request errors.
@@ -18,7 +19,6 @@ import { listUsers, registerUser } from '../../hooks/session/users'
  */
 export default function UserDialog({ user, onSwitch, onClose }) {
   const { t } = useTranslation()
-  const dialogRef = useRef(null)
   const controllerRef = useRef(null)
   const [users, setUsers] = useState([])
   const [selected, setSelected] = useState(String(user.id))
@@ -31,10 +31,7 @@ export default function UserDialog({ user, onSwitch, onClose }) {
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    // 1. Acquire modal focus; dismissal/unmount also cancels any activation request.
-    const dialog = dialogRef.current
-    dialog.showModal()
-    return () => { dialog.close(); controllerRef.current?.abort() }
+    return () => controllerRef.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -87,9 +84,7 @@ export default function UserDialog({ user, onSwitch, onClose }) {
     }
   }
 
-  return <dialog ref={dialogRef} className="help-dialog" aria-labelledby="user-title"
-    onCancel={(event) => { event.preventDefault(); if (!busy) onClose() }}
-    onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+  return <AdaptiveDialog className="help-dialog" aria-labelledby="user-title" dismissible={!busy} onClose={onClose}>
     <section className="help-modal user-modal" aria-busy={busy || loading}>
       <button className="icon-button modal-close" aria-label={t('Close user selection')} disabled={busy} onClick={onClose}><X size={20} /></button>
       <h2 id="user-title">{t('Choose your user')}</h2>
@@ -116,5 +111,5 @@ export default function UserDialog({ user, onSwitch, onClose }) {
         {!users.length && <button className="secondary-button" disabled={loading} onClick={() => { setError(''); setLoading(true); setAttempt((n) => n + 1) }}>{t('Retry')}</button>}
       </div>}
     </section>
-  </dialog>
+  </AdaptiveDialog>
 }

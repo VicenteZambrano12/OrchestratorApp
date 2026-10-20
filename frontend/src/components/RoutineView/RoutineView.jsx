@@ -4,6 +4,7 @@
  * sets stay separate; persistence is delegated through callbacks from MainView.
  */
 import { Fragment, useRef, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, Check, CheckCheck, Clock3, Dumbbell, GripVertical, Play, Plus, Sparkles, Square, Target, Trash2 } from 'lucide-react'
 import { useWorkoutEditor } from '../../features/RoutineView/workout-editing/useWorkoutEditor'
@@ -45,9 +46,6 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
   const [workoutRecorded, setWorkoutRecorded] = useState(false)
   const dialogIndex = exerciseDialog?.index ?? null
   const dragIndex = useRef(null)
-  const dialogTrigger = useRef(null)
-  const editButtonRef = useRef(null)
-  const workoutButtonRef = useRef(null)
   const { isEditing, validation, toggleEditing, changeExercise, addExercise, swapExercise, removeExercise, reorderExercise } =
     useWorkoutEditor({ routine, dayIndex, setRoutine, onSave })
   const day = routine.days[dayIndex]
@@ -65,10 +63,9 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     else toggleEditing()
   }
 
-  /** @returns {void} Closes version confirmation and restores the triggering control's focus. */
+  /** @returns {void} Requests dismissal; the dialog restores focus after exit. */
   function closeUpdate() {
     setConfirmUpdate(false)
-    editButtonRef.current?.focus()
   }
 
   /**
@@ -109,10 +106,9 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     session.startWorkout(dayIndex, day.exercises)
   }
 
-  /** @returns {void} Closes workout confirmation and restores focus to the workout control. */
+  /** @returns {void} Requests dismissal; the dialog restores focus after exit. */
   function closeFinish() {
     setConfirmFinish(false)
-    workoutButtonRef.current?.focus()
   }
 
   /**
@@ -160,20 +156,17 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
   }
 
   /**
-   * Opens add/swap selection and retains its trigger for accessible focus recovery.
-   * @param {import('react').MouseEvent<HTMLButtonElement>} event - Trigger activation.
+   * Opens add/swap selection; the shared dialog retains the active trigger.
    * @param {number|null} [index=null] - Swap target; null means add.
    * @returns {void}
    */
-  function openDialog(event, index = null) {
-    dialogTrigger.current = event.currentTarget
+  function openDialog(index = null) {
     setExerciseDialog({ index })
   }
 
   /** @returns {void} Closes exercise selection and restores focus to its trigger. */
   function closeDialog() {
     setExerciseDialog(null)
-    dialogTrigger.current?.focus()
   }
 
   /**
@@ -228,8 +221,8 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     </button>)}</div>
     <section className="workout-card" id="day-panel" role="tabpanel" aria-labelledby={`day-tab-${dayIndex}`}>
       <div className="workout-heading"><div><span className="eyebrow">{t('DAY')} {dayIndex + 1}, {t("LET'S DO THIS")}</span><h2>{t('workoutDay', { day: t(day.name) })} <span>{t('exercises', { count: day.exercises.length })}</span></h2></div>
-        <div className="button-group workout-actions"><button ref={editButtonRef} className={`secondary-button ${isEditing ? 'done-editing' : ''}`} aria-pressed={isEditing} disabled={session.isWorkoutActive || routine.storageFormat === 'legacy'} onClick={finishEditing}>{isEditing && <Check size={15} />}{t(isEditing ? 'Done editing' : 'Edit workout')}</button>
-          <button ref={workoutButtonRef} className="start-workout" disabled={Boolean(validation || workoutValidation) || (!session.isWorkoutActive && (isEditing || day.exercises.length === 0 || !onFinishWorkout))} onClick={session.isWorkoutActive ? () => setConfirmFinish(true) : startWorkout}>{session.isWorkoutActive ? <Square size={15} /> : <Play size={15} fill="currentColor" />}{t(session.isWorkoutActive ? 'Finish workout' : 'Start Workout')}</button>
+        <div className="button-group workout-actions"><button className={`secondary-button ${isEditing ? 'done-editing' : ''}`} aria-pressed={isEditing} disabled={session.isWorkoutActive || routine.storageFormat === 'legacy'} onClick={finishEditing}>{isEditing && <Check size={15} />}{t(isEditing ? 'Done editing' : 'Edit workout')}</button>
+          <button className="start-workout" disabled={Boolean(validation || workoutValidation) || (!session.isWorkoutActive && (isEditing || day.exercises.length === 0 || !onFinishWorkout))} onClick={session.isWorkoutActive ? () => setConfirmFinish(true) : startWorkout}>{session.isWorkoutActive ? <Square size={15} /> : <Play size={15} fill="currentColor" />}{t(session.isWorkoutActive ? 'Finish workout' : 'Start Workout')}</button>
         </div>
       </div>
       {session.isWorkoutActive && <div className="session-status"><span><Clock3 size={16} />{t('Session timer')} <time aria-label={t('Elapsed time')}>{formatTime(session.elapsed)}</time></span><span>{t('dayCompletion', { completed: complete, total: day.exercises.length })}</span></div>}
@@ -250,12 +243,12 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
             </button>}
             <span className="exercise-number">{String(index + 1).padStart(2, '0')}</span><span><strong>{t(exercise.name)}</strong><small>{exercise.muscle && <>{t(exercise.muscle)} · </>}{t('restDuration', { duration: exercise.rest === null ? t('Unknown') : t(exercise.rest) })}</small>{exercise.notes && <small>{exercise.notes}</small>}</span>
           </div>
-          {['sets', 'reps', 'weight'].map((field) => <span key={field}>{session.isWorkoutActive ? exercise[field] : <ExerciseValueInput exercise={exercise} field={field} weightUnit={weightUnit} onChange={(value) => changeExercise(index, field, value)} />}</span>)}
-          <button className={`completion-button ${exercise.completed ? 'checked' : ''}`} role="checkbox" aria-label={t(exercise.completed ? 'Mark {{exercise}} incomplete' : 'Mark {{exercise}} complete', { exercise: t(exercise.name) })} aria-checked={exercise.completed} onClick={() => completeExercise(index)}>{exercise.completed && <Check size={16} strokeWidth={3} />}</button>
+          {['sets', 'reps', 'weight'].map((field) => <label className="exercise-field" key={field}><span className="exercise-field-label">{field === 'weight' ? weightUnit.toUpperCase() : t(field)}</span>{session.isWorkoutActive ? <span>{exercise[field]}</span> : <ExerciseValueInput exercise={exercise} field={field} weightUnit={weightUnit} onChange={(value) => changeExercise(index, field, value)} />}</label>)}
+          <button className={`completion-button ${exercise.completed ? 'checked' : ''}`} role="checkbox" aria-label={t(exercise.completed ? 'Mark {{exercise}} incomplete' : 'Mark {{exercise}} complete', { exercise: t(exercise.name) })} aria-checked={exercise.completed} onClick={() => completeExercise(index)}>{exercise.completed && <Check size={16} strokeWidth={3} />}<span className="completion-label">{t('DONE')}</span></button>
           {isEditing && <div className="exercise-actions">
             <button className="icon-button" disabled={index === 0} aria-label={t('Move {{exercise}} up', { exercise: t(exercise.name) })} title={t('Move up')} onClick={() => reorder(index, index - 1)}><ArrowUp size={15} /></button>
             <button className="icon-button" disabled={index === day.exercises.length - 1} aria-label={t('Move {{exercise}} down', { exercise: t(exercise.name) })} title={t('Move down')} onClick={() => reorder(index, index + 1)}><ArrowDown size={15} /></button>
-            <button className="icon-button" aria-label={t('Swap {{exercise}}', { exercise: t(exercise.name) })} title={t('Swap exercise')} onClick={(event) => openDialog(event, index)}><ArrowLeftRight size={16} /></button>
+            <button className="icon-button" aria-label={t('Swap {{exercise}}', { exercise: t(exercise.name) })} title={t('Swap exercise')} onClick={() => openDialog(index)}><ArrowLeftRight size={16} /></button>
             <button className="icon-button remove-exercise" aria-label={t('Remove {{exercise}}', { exercise: t(exercise.name) })} title={t('Remove exercise')} onClick={() => { removeExercise(index); session.skipRest() }}><Trash2 size={16} /></button>
           </div>}
         </div>
@@ -274,7 +267,7 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
         </div>}
         </Fragment>)}
       </div></div>
-      {isEditing && <button className="add-exercise" onClick={(event) => openDialog(event)}><Plus size={17} />{t('Add exercise to {{day}}', { day: t(day.name) })}</button>}
+      {isEditing && <button className="add-exercise" onClick={() => openDialog()}><Plus size={17} />{t('Add exercise to {{day}}', { day: t(day.name) })}</button>}
       {session.remaining > 0 && <div className="rest-countdown" role="group" aria-label={t('Rest countdown')}><span><Clock3 size={16} />{t('Rest')} <time role="timer">{formatTime(session.remaining)}</time></span><button onClick={session.extendRest} aria-label={t('Add 15 seconds of rest')}>+15s</button><button onClick={session.skipRest}>{t('Skip')}</button></div>}
       <div className="workout-footer"><span><CheckCheck size={17} />{t('exerciseCompletion', { completed: complete, total: day.exercises.length })}</span><span>{t('Warm up before you start. Make every rep count.')}</span></div>
     </section>
@@ -283,8 +276,10 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     {workoutRecorded && <p className="save-message" role="status"><Check size={15} />{t('Workout saved successfully.')}</p>}
     {routine.recovery && <p>{routine.recovery}</p>}
     <div className="routine-coach-banner"><span className="tip-icon"><Sparkles size={24} /></span><div><h3>{t("Your routine isn't set in stone.")}</h3><p>{t('Different schedule? New goal? Your coach can help you adapt.')}</p></div><button className="primary-button" onClick={() => onAsk(t('Help me update my routine to fit my schedule.'))}>{t('Adjust with AI')} <ArrowRight size={16} /></button></div>
-    {exerciseDialog && <ExerciseDialog exercise={dialogIndex === null ? null : day.exercises[dialogIndex]} suggestions={suggestions} onConfirm={confirmExercise} onClose={closeDialog} />}
-    {confirmUpdate && <RoutineUpdateDialog onConfirm={updateRoutine} onClose={closeUpdate} />}
-    {confirmFinish && <WorkoutFinishDialog sets={completedSets} onConfirm={finishWorkout} onClose={closeFinish} />}
+    <AnimatePresence>
+      {exerciseDialog && <ExerciseDialog key="exercise" exercise={dialogIndex === null ? null : day.exercises[dialogIndex]} suggestions={suggestions} onConfirm={confirmExercise} onClose={closeDialog} />}
+      {confirmUpdate && <RoutineUpdateDialog key="update" onConfirm={updateRoutine} onClose={closeUpdate} />}
+      {confirmFinish && <WorkoutFinishDialog key="finish" sets={completedSets} onConfirm={finishWorkout} onClose={closeFinish} />}
+    </AnimatePresence>
   </div>
 }

@@ -21,7 +21,7 @@ const logger = createLogger('theme')
  */
 export function ThemeProvider({ children }) {
   const { t } = useTranslation()
-  const [preference, setPreference] = useState(() => document.documentElement.dataset.themePreference || 'system')
+  const [preference, setPreference] = useState(() => document.documentElement.dataset.themePreference || 'dark')
   const [resolvedTheme, setResolvedTheme] = useState(() => document.documentElement.classList.contains('dark') ? 'dark' : 'light')
   const [error, setError] = useState(() => document.documentElement.dataset.themeError || '')
 

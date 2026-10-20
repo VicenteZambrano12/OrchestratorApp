@@ -101,7 +101,7 @@ export async function demoReply(query, signal) {
   if (/routine|plan|muscle|strength|schedule/i.test(query)) {
     return { subsystem: 'routine_maker', content: 'Here’s an **illustrative starting plan**, not a personalized assessment. The demo uses the same 3-day split; live mode can tailor it to your requirements.\n\n' + demoRoutine + '\n\nSave this recommendation to your routine, then adjust the exercise targets to suit your level.', routine: demoRoutine }
   }
-  return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain. 🌱\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
+  return { subsystem: 'no_system', content: 'Small, repeatable steps beat a perfect plan you can’t sustain.\n\nTry choosing **three consistent training days**, preparing your gym kit the night before, and tracking one small win after every session.\n\nThis is example coaching in demo mode. Switch to **Live API** for a response to your specific question.' }
 }
 
 /**

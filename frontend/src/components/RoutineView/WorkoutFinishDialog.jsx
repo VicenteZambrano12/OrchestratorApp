@@ -3,9 +3,10 @@
  * Validates filled sets from completed exercises and keeps the workout active when
  * saving fails; planned targets are not used as substitutes for actual repetitions.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { workoutSetsError } from '../../features/RoutineView/workout-session/workoutSets'
+import AdaptiveDialog from '../AdaptiveDialog/AdaptiveDialog'
 
 /**
  * Confirms actual-set persistence with native modal focus and duplicate-write guards.
@@ -17,17 +18,9 @@ import { workoutSetsError } from '../../features/RoutineView/workout-session/wor
  */
 export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
   const { t } = useTranslation()
-  const dialogRef = useRef(null)
   const inFlight = useRef(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    // 1. Open a native modal once and release it on unmount.
-    const dialog = dialogRef.current
-    dialog.showModal()
-    return () => dialog.close()
-  }, [])
 
   /**
    * Validates actual sets, normalizes numbers, and awaits parent-owned persistence.
@@ -61,9 +54,8 @@ export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
     }
   }
 
-  return <dialog ref={dialogRef} className="exercise-dialog workout-finish-dialog" aria-labelledby="workout-finish-title" aria-describedby="workout-finish-disclaimer"
-    onCancel={(event) => { event.preventDefault(); if (!saving) onClose() }}
-    onClick={(event) => { if (!saving && event.target === event.currentTarget) onClose() }}>
+  return <AdaptiveDialog className="exercise-dialog workout-finish-dialog" aria-labelledby="workout-finish-title" aria-describedby="workout-finish-disclaimer"
+    dismissible={!saving} onClose={onClose}>
     <form onSubmit={confirm} aria-busy={saving}>
       <h3 id="workout-finish-title">{t('Finish and save your workout?')}</h3>
       <p id="workout-finish-disclaimer">{t('Only filled sets from exercises marked Done will be saved. Sets with blank reps and empty exercises are skipped. Your workout will finish only after it is saved successfully.')}</p>
@@ -74,5 +66,5 @@ export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
         <button type="submit" className="primary-button" disabled={saving || sets.length === 0}>{t(saving ? 'Saving workout…' : 'Yes, finish and save')}</button>
       </div>
     </form>
-  </dialog>
+  </AdaptiveDialog>
 }

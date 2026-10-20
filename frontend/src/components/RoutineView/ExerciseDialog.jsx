@@ -3,7 +3,7 @@
  * Suggestions preserve catalog identity; custom names remain local and cannot be
  * persisted as catalog-backed routine targets by the complete-plan serializer.
  */
-import { useEffect, useRef } from 'react'
+import AdaptiveDialog from '../AdaptiveDialog/AdaptiveDialog'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 
@@ -18,16 +18,7 @@ import { X } from 'lucide-react'
  */
 export default function ExerciseDialog({ exercise, suggestions, onConfirm, onClose }) {
   const { t } = useTranslation()
-  const dialogRef = useRef(null)
   const swapping = Boolean(exercise)
-
-  useEffect(() => {
-    // 1. Enter the native modal focus boundary after the element mounts.
-    const dialog = dialogRef.current
-    dialog.showModal()
-    // 2. Release modal state when the parent removes the dialog.
-    return () => dialog.close()
-  }, [])
 
   /**
    * Resolves translated suggestions to stable identities before publishing selection.
@@ -49,9 +40,7 @@ export default function ExerciseDialog({ exercise, suggestions, onConfirm, onClo
     onConfirm({ name: selected?.name ?? name, exerciseId: selected?.exerciseId ?? null, rest: `${Number(data.get('rest'))}s` })
   }
 
-  return <dialog ref={dialogRef} className="exercise-dialog" aria-labelledby="exercise-dialog-title"
-    onCancel={(event) => { event.preventDefault(); onClose() }}
-    onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return <AdaptiveDialog className="exercise-dialog" aria-labelledby="exercise-dialog-title" onClose={onClose}>
     <form onSubmit={submit}>
       <div className="exercise-dialog-heading"><h3 id="exercise-dialog-title">{t(swapping ? 'Swap exercise' : 'Add exercise')}</h3><button type="button" className="icon-button" aria-label={t('Close')} onClick={onClose}><X size={18} /></button></div>
       <label>{t('Exercise name')}<input name="name" required autoFocus maxLength={120} list="exercise-suggestions"
@@ -61,5 +50,5 @@ export default function ExerciseDialog({ exercise, suggestions, onConfirm, onClo
       <label>{t('Rest (seconds)')}<input name="rest" type="number" min="0" max="900" step="1" required defaultValue="90" /></label>
       <div className="button-group"><button type="button" className="secondary-button" onClick={onClose}>{t('Cancel')}</button><button className="primary-button" type="submit">{t(swapping ? 'Swap exercise' : 'Add exercise')}</button></div>
     </form>
-  </dialog>
+  </AdaptiveDialog>
 }

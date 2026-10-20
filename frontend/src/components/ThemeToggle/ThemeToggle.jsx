@@ -17,7 +17,7 @@ export default function ThemeToggle() {
   const { theme, resolvedTheme, setTheme } = useTheme()
   return <div className="theme-controls">
     <button type="button"
-      className="theme-toggle transition-transform duration-200 active:scale-95 focus-visible:ring-2 focus-visible:ring-emerald-600"
+      className="theme-toggle"
       aria-label={t('Toggle theme')} aria-pressed={resolvedTheme === 'dark'}
       title={t(resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
       onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>

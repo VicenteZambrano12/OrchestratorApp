@@ -3,8 +3,9 @@
  * In-flight state prevents duplicate writes and dismissal; save rejection remains
  * visible in the dialog without discarding the parent-owned edited routine.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import AdaptiveDialog from '../AdaptiveDialog/AdaptiveDialog'
 
 /**
  * Confirms a new active routine version, excluding actual workout weights/completion.
@@ -15,17 +16,9 @@ import { useTranslation } from 'react-i18next'
  */
 export default function RoutineUpdateDialog({ onConfirm, onClose }) {
   const { t } = useTranslation()
-  const dialogRef = useRef(null)
   const inFlight = useRef(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    // 1. Open a native modal once and release it on unmount.
-    const dialog = dialogRef.current
-    dialog.showModal()
-    return () => dialog.close()
-  }, [])
 
   /**
    * Serializes user confirmation and reports persistence errors in place.
@@ -51,9 +44,8 @@ export default function RoutineUpdateDialog({ onConfirm, onClose }) {
     }
   }
 
-  return <dialog ref={dialogRef} className="exercise-dialog" aria-labelledby="routine-update-title" aria-describedby="routine-update-disclaimer"
-    onCancel={(event) => { event.preventDefault(); if (!saving) onClose() }}
-    onClick={(event) => { if (!saving && event.target === event.currentTarget) onClose() }}>
+  return <AdaptiveDialog className="exercise-dialog" aria-labelledby="routine-update-title" aria-describedby="routine-update-disclaimer"
+    dismissible={!saving} onClose={onClose}>
     <form onSubmit={confirm} aria-busy={saving}>
       <h3 id="routine-update-title">{t('Update your routine?')}</h3>
       <p id="routine-update-disclaimer">{t('This will save your edits as a new active routine. Your previous routine will be kept as an inactive version.')}</p>
@@ -64,5 +56,5 @@ export default function RoutineUpdateDialog({ onConfirm, onClose }) {
         <button type="submit" className="primary-button" disabled={saving}>{t(saving ? 'Saving routine…' : 'Yes, update routine')}</button>
       </div>
     </form>
-  </dialog>
+  </AdaptiveDialog>
 }

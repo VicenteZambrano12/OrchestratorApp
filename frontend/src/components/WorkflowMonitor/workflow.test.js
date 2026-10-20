@@ -18,23 +18,52 @@ const steps = [
   { id: 'sql_1', label: 'Executing SQL query', kind: 'sql', parent: 'exercise_catalog', sql: 'SELECT * FROM dim_exercises WHERE id = ?', source: 'SQLite / gym_app.db' },
 ]
 
-test('graph highlights only the executed branch and attaches SQL and source nodes', () => {
+test('graph highlights only the executed branch and its connection to the shared database', () => {
   const events = playbackEvents(steps, 'running')
   const { nodes, height } = buildWorkflowGraph(events, 'running')
   assert.equal(nodes.find(({ id }) => id === 'exercise_sql').state, 'done')
   assert.equal(nodes.find(({ id }) => id === 'exercise_sql').parent, 'exercise_catalog')
-  assert.equal(nodes.find(({ id }) => id === 'exercise_source').label, 'SQLite / gym_app.db')
-  assert.equal(nodes.find(({ id }) => id === 'exercise_source').parent, 'exercise_sql')
-  assert.equal(nodes.find(({ id }) => id === 'exercise_source').state, 'active')
+  assert.equal(nodes.find(({ id }) => id === 'database').source, 'SQLite / gym_app.db')
+  assert.equal(nodes.find(({ id }) => id === 'database').state, 'active')
+  assert.equal(nodes.filter(({ kind }) => kind === 'source').length, 1)
+  const connections = buildWorkflowGraph(events, 'running').edges.filter(({ to }) => to === 'database')
+  assert.deepEqual(connections.map(({ from, state }) => ({ from, state })), [
+    { from: 'routine_sql', state: 'idle' },
+    { from: 'exercise_sql', state: 'active' },
+    { from: 'history_sql', state: 'idle' },
+  ])
+  assert.equal(buildWorkflowGraph(events.slice(0, -1), 'running').edges.find(
+    ({ id }) => id === 'exercise_sql-database',
+  ).state, 'idle')
   assert.equal(nodes.find(({ id }) => id === 'exercise_sql').x, 355)
   assert.ok(branches.filter(({ id }) => id !== 'exercise_explainer').every(
     (branch) => nodes.find(({ id }) => id === branch.id).state === 'idle',
   ))
   assert.ok(height > 560)
   const failed = buildWorkflowGraph(events, 'failed').nodes
-  assert.equal(failed.find(({ id }) => id === 'exercise_source').state, 'failed')
+  assert.equal(failed.find(({ id }) => id === 'database').state, 'failed')
+  assert.equal(buildWorkflowGraph(events, 'failed').edges.find(
+    ({ id }) => id === 'exercise_sql-database',
+  ).state, 'failed')
   assert.ok(buildWorkflowGraph(events, 'complete').nodes.every(({ state }) => state !== 'active'))
   assert.ok(buildWorkflowGraph([], 'idle').nodes.every(({ state }) => state === 'idle'))
+})
+
+test('all SQL branches share one database while keeping independent connection history', () => {
+  const queries = ['routine_context', 'exercise_catalog', 'history_search'].map((parent, index) => ({
+    ...steps.at(-1), id: `sql_${index}`, parent,
+  }))
+  const events = playbackEvents(queries, 'running')
+  const running = buildWorkflowGraph(events, 'running')
+  assert.equal(running.nodes.filter(({ kind }) => kind === 'source').length, 1)
+  assert.deepEqual(running.edges.filter(({ to }) => to === 'database').map(({ from, state }) => ({ from, state })), [
+    { from: 'routine_sql', state: 'done' },
+    { from: 'exercise_sql', state: 'done' },
+    { from: 'history_sql', state: 'active' },
+  ])
+  assert.ok(buildWorkflowGraph(events, 'complete').edges.filter(({ to }) => to === 'database')
+    .every(({ state }) => state === 'done'))
+  assert.ok(buildWorkflowGraph([], 'idle').edges.every(({ state }) => state === 'idle'))
 })
 
 test('entire tree has stable positions before, during, and after execution and fits the available space', () => {
@@ -46,7 +75,12 @@ test('entire tree has stable positions before, during, and after execution and f
   ], 'complete'), 'complete')
   assert.deepEqual(completed.nodes.map(({ id, x, y }) => ({ id, x, y })),
     idle.nodes.map(({ id, x, y }) => ({ id, x, y })))
-  assert.equal(idle.nodes.length, 25)
+  assert.equal(idle.nodes.length, 23)
+  assert.equal(idle.edges.length, 24)
+  const database = idle.nodes.find(({ id }) => id === 'database')
+  assert.equal(database.x, 25)
+  assert.equal(database.y, 20)
+  assert.ok(idle.nodes.every(({ x, y }) => x >= database.x && y >= database.y))
   for (const id of ['routine_updater', 'routine_build', 'routine_save', 'weekly_performance', 'past_day_exercise', 'compare_last_two_workouts', 'response']) {
     assert.ok(idle.nodes.some((node) => node.id === id))
   }
@@ -179,7 +213,7 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     window.open = () => child
     await act(async () => container.querySelector('button').click())
     assert.ok(child.document.querySelector('.workflow-monitor'))
-    assert.equal(child.document.querySelectorAll('.workflow-node').length, 25)
+    assert.equal(child.document.querySelectorAll('.workflow-node').length, 23)
     assert.equal(container.querySelector('[role="alert"]'), null)
     mock.timers.enable({ apis: ['setTimeout'] })
     const trace = { id: 'request-1', steps, status: 'complete', query: 'Explain a squat', response: { subsystem: 'exercise_explainer', response: 'Already available' } }
@@ -188,7 +222,7 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     assert.ok(child.document.querySelector('.workflow-node.active'))
     assert.match(child.document.querySelector('.workflow-api-response').textContent, /Already available/)
     assert.match(child.document.querySelector('[role="status"]').textContent, /Playing execution/)
-    assert.equal(child.document.querySelectorAll('.workflow-node').length, 25)
+    assert.equal(child.document.querySelectorAll('.workflow-node').length, 23)
     assert.equal(child.document.querySelectorAll('.workflow-event-log details').length, 1)
     await act(async () => mock.timers.tick(999))
     assert.equal(child.document.querySelector('[data-node-id="orchestrator"]').classList.contains('idle'), true)
@@ -209,9 +243,9 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
     await act(async () => render({ ...trace, status: 'failed', error: 'Connection lost' }))
     assert.match(child.document.querySelector('[role="alert"]').textContent, /Connection lost/)
     await act(async () => mock.timers.tick(1000))
-    assert.equal(child.document.querySelector('[data-node-id="exercise_source"]').classList.contains('active'), true)
+    assert.equal(child.document.querySelector('[data-node-id="database"]').classList.contains('active'), true)
     await act(async () => mock.timers.tick(1000))
-    assert.equal(child.document.querySelector('[data-node-id="exercise_source"]').classList.contains('failed'), true)
+    assert.equal(child.document.querySelector('[data-node-id="database"]').classList.contains('failed'), true)
     await act(async () => render({ id: 'request-2', steps: [], status: 'running', query: 'Next request' }))
     assert.equal(child.document.querySelectorAll('.workflow-event-log details').length, 1)
     assert.equal(child.document.querySelectorAll('.workflow-node.done').length, 0)

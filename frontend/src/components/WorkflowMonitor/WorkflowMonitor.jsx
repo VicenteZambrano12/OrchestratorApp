@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next'
 import { buildWorkflowGraph, fitWorkflowGraph, graphNodeId, playbackEvents } from './workflowGraph'
 import './WorkflowMonitor.css'
 
+const edgeLayers = { idle: 0, done: 1, active: 2, failed: 3 }
+
 /**
  * Presents the full architecture tree with time-revealed execution highlights.
  * Local revealed/finished state intentionally lags actual terminal status for
@@ -63,14 +65,26 @@ export function WorkflowDiagram({ trace }) {
   // Playback may still run after the actual backend request has completed or failed.
   const status = trace.status === 'idle' ? 'idle' : finished ? trace.status : 'running'
   const graph = buildWorkflowGraph(visibleEvents, status)
-  const { nodes, width, height } = graph
+  const { nodes, edges, width, height } = graph
   const selected = nodes.find(({ id }) => id === selectedId)
   const activeEvent = visibleEvents.at(-1)
   const activeNode = nodes.find(({ id }) => id === graphNodeId(activeEvent ?? { id: '' }))
   const inspected = selected ?? activeNode
   const scale = fitWorkflowGraph(size, graph)
+  const databaseLaneY = nodes.find(({ id }) => id === 'orchestrator').y + 76 + 16
   const statusLabel = status === 'running' && terminal ? 'Playing execution' :
     { idle: 'Waiting for a request', running: 'Live', complete: 'Complete', failed: 'Interrupted' }[status]
+
+  function renderNode(node) {
+    const Icon = node.kind === 'sql' ? Code2 : node.kind === 'source' ? Database : node.id === 'orchestrator' ? GitBranch : Activity
+    const detail = (node.kind === 'sql' || node.kind === 'source') && node.source ? node.source :
+      t({ idle: 'Not visited', done: 'Complete', active: 'In progress', failed: 'Interrupted' }[node.state])
+    return <button key={node.id} data-node-id={node.id} className={`workflow-node ${node.state}${node.kind === 'source' ? ' database-node' : ''}${selectedId === node.id ? ' selected' : ''}`}
+      style={{ left: node.x, top: node.y }}
+      onClick={() => setSelectedId(node.id)} aria-pressed={selectedId === node.id}>
+      <Icon size={24} aria-hidden="true" /><span><strong>{t(node.label)}</strong><small title={detail}>{detail}</small></span>
+    </button>
+  }
 
   return <main className="workflow-monitor">
     <header className="workflow-heading">
@@ -87,27 +101,24 @@ export function WorkflowDiagram({ trace }) {
         <section ref={viewportRef} className="workflow-viewport" aria-label={t('Request node diagram')}>
           <div className="workflow-canvas" style={{ width, height, transform: `translate(-50%, -50%) scale(${scale})` }}>
             <svg width={width} height={height} aria-hidden="true">
-              {nodes.filter(({ parent }) => parent).map((node) => {
-                const parent = nodes.find(({ id }) => id === node.parent)
+              {edges.toSorted((a, b) => edgeLayers[a.state] - edgeLayers[b.state]).map((edge) => {
+                const parent = nodes.find(({ id }) => id === edge.from)
+                const node = nodes.find(({ id }) => id === edge.to)
                 const x1 = parent.x + 140
                 const y1 = parent.y + 76
                 const x2 = node.x + 140
                 const y2 = node.y
                 const side = parent.x + 302
-                const path = parent.x === node.x && y2 - y1 > 50
+                const path = node.id === 'database'
+                  ? `M ${parent.x} ${parent.y + 38} H ${parent.x - 12} V ${databaseLaneY} H ${node.x - 12} V ${node.y + 38} H ${node.x}`
+                  : parent.x === node.x && y2 - y1 > 50
                   ? `M ${parent.x + 280} ${parent.y + 38} H ${side} V ${node.y + 38} H ${node.x + 280}`
                   : `M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`
-                return <path key={node.id} className={`workflow-edge ${node.state}`} d={path} />
+                return <path key={edge.id} data-edge-from={edge.from} data-edge-to={edge.to}
+                  className={`workflow-edge ${edge.state}`} d={path} />
               })}
             </svg>
-            {nodes.map((node) => {
-              const Icon = node.kind === 'sql' ? Code2 : node.kind === 'source' ? Database : node.id === 'orchestrator' ? GitBranch : Activity
-              return <button key={node.id} data-node-id={node.id} className={`workflow-node ${node.state}${selectedId === node.id ? ' selected' : ''}`}
-                style={{ left: node.x, top: node.y }} onClick={() => setSelectedId(node.id)} aria-pressed={selectedId === node.id}>
-                <Icon size={24} /><span><strong>{t(node.label)}</strong><small>{node.kind === 'sql' && node.source ? node.source :
-                  t({ idle: 'Not visited', done: 'Complete', active: 'In progress', failed: 'Interrupted' }[node.state])}</small></span>
-              </button>
-            })}
+            {nodes.map(renderNode)}
           </div>
         </section>
       </section>
@@ -119,6 +130,7 @@ export function WorkflowDiagram({ trace }) {
             {selected && <button className="icon-button" aria-label={t('Close node details')} onClick={() => setSelectedId(null)}><X size={16} /></button>}
           </div>
           {inspected?.sql ? <><p><Database size={16} />{inspected.source}</p><pre>{inspected.sql}</pre><small>{t('Bound values and database rows are not displayed.')}</small></> :
+            inspected?.kind === 'source' ? <><p><Database size={16} />{inspected.source ?? t('Database source')}</p><small>{t('Bound values and database rows are not displayed.')}</small></> :
             <p>{t('Live execution stages, not private model reasoning. Select a node for details.')}</p>}
         </section>
         {trace.error && <section className="workflow-error" role="alert">{trace.error}</section>}
@@ -206,6 +218,10 @@ export default function WorkflowMonitor({ trace }) {
     }
     // 3. Copy current styles and create a dedicated React portal mount.
     child.document.title = t('Live request flow')
+    const viewport = child.document.createElement('meta')
+    viewport.name = 'viewport'
+    viewport.content = 'width=device-width, initial-scale=1'
+    child.document.head.appendChild(viewport)
     child.document.body.classList.add('workflow-window')
     document.querySelectorAll('style, link[rel="stylesheet"]').forEach((style) => {
       child.document.head.appendChild(style.cloneNode(true))

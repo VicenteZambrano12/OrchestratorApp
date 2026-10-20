@@ -1,6 +1,6 @@
 # Form frontend
 
-A responsive React + Vite mockup for OrchestratorApp, with two views:
+A responsive React + Vite application for OrchestratorApp, with two views:
 
 - **AI Chat:** safe Markdown responses, always-visible live workflow steps,
   suggested prompts, and a live API connection. Each executed node adds one short
@@ -31,8 +31,39 @@ their validators and adapters rather than introducing runtime interfaces.
 Numbered comments explain lifecycle, cancellation, mutation, and recovery flows.
 Keep these contracts aligned with implementation when changing behavior, especially
 NDJSON event handling, routine draft confirmation, and actual-set persistence.
-CSS owns visual transitions except for the explicitly documented gallery and
-workflow playback timers; neither timer controls backend execution.
+Framer Motion owns startup and dialog entry/exit transitions. CSS owns smaller
+visual feedback; gallery and workflow playback timers never control backend execution.
+
+### Responsive UI and accessibility
+
+The shared `src/workspace.css` foundation coordinates the application shell,
+44px minimum controls, visible keyboard focus, skip navigation, readable text,
+safe-area spacing, and wrapping content. Feature-specific styles own card,
+exercise, report, and chart layouts.
+
+- **Mobile first:** chat, navigation, training content, exercise inputs, and report
+  sections stack instead of overflowing or hiding features. Wider layouts use
+  48rem, 64rem, and 80rem breakpoints. The desktop chat shell contains scrolling
+  only when enough horizontal and vertical space is available.
+- **Dialogs:** `AdaptiveDialog` keeps native focus trapping, Escape/backdrop
+  dismissal, pending-save locks, and focus restoration. It slides up as a mobile
+  sheet and centers on larger screens. `AnimatePresence` retains it until exit
+  finishes; reduced-motion preferences disable the transition.
+- **Theme:** new visitors start in dark mode. Saved light/dark/system preferences
+  and cross-tab synchronization still apply. Shared text/control colors are
+  contrast-tested in both themes; data and error labels do not rely on color alone.
+- **Resilient data:** mobile routine rows become labeled cards, day selectors wrap,
+  report metrics remain visible, and long headings/errors reflow at 200% text size.
+- **Workflow:** when graph scaling would shrink node controls below usable text
+  sizes, all nodes appear as a selectable, unscaled list. Narrow popup windows
+  stack node selection and results.
+
+Run `npm run test:ui` after `npx playwright install chromium` for browser checks
+at 375, 768, 1024, and 1440px. `npm run test:startup` runs the focused startup
+suite. Tests cover touch targets, overflow, focus restoration, reduced motion,
+long text, EN/ES, theme preferences, routine updates, failed-workout recovery,
+structured responses, and solid-surface text contrast. Gradient/image-backed
+surfaces also need visual review; browser checks are not a WCAG certification.
 
 ### Frontend observability
 
@@ -75,9 +106,15 @@ listener lifecycle, and React error-boundary tests.
 Use **Live system map** in the header to open a separate, resizable browser window.
 Move it independently (including to another display) while using chat. It stays
 connected to the latest request, including when opened midway through a response.
-The entire tree, including optional branches, SQL, sources, and the response node,
-is visible before execution. The tree automatically fits the window on resize,
-without internal graph scrollbars or nodes being added as execution progresses.
+The entire tree, including optional branches, SQL, a shared database, and the response node,
+is visible before execution. The connected tree automatically scales to fit its
+panel at every window size; it never switches to a flat list. This overview
+intentionally scales node labels and hit areas with the diagram to preserve the
+original full-tree presentation. No nodes are added as execution progresses.
+One cylinder-shaped database node in the top-left corner connects to all three SQL branches. Each
+connection highlights independently, so using one branch does not mark the other
+database connections as executed. Selecting the database shows its source label,
+without exposing bound values or database rows.
 Repeated queries and per-exercise explanations reuse their stage nodes; every
 individual event remains available in the right-hand execution log.
 
@@ -87,8 +124,8 @@ second, including a separate step for each SQL source; this never delays network
 requests or the chat answer. The status shows **Playing execution** if the API has
 already finished but the visualization is catching up. The right-hand panel shows
 the chat and routine-save API responses as soon as they arrive, the selected/current node's details,
-and execution events as playback reveals them. Only this panel scrolls vertically;
-SQL and JSON wrap rather than producing nested horizontal scrollbars.
+and execution events as playback reveals them. Results stack below the tree
+on narrow windows; SQL and JSON wrap rather than producing horizontal scrollbars.
 The map resets for each request or new conversation, closes when switching users,
 and follows the application's theme and language. Allow pop-ups for this site if
 the browser blocks the window.
@@ -339,7 +376,8 @@ the backend currently returns routine text, not a structured exercise list.
 The header sun/moon button toggles Light and Dark; the adjacent selector also
 offers System, which follows OS appearance changes. The preference persists as
 `form-theme` in local storage and synchronizes across tabs. An early head script
-applies the root `.dark` class before first paint. Storage failures are reported
+applies the root `.dark` class before first paint. New visitors default to Dark;
+saved Light and System selections take precedence. Storage failures are reported
 without preventing an in-memory theme change.
 
 Semantic palettes live in `src/theme.css`, shared by chat, routines, loading,
@@ -354,4 +392,5 @@ to preserve the existing component styles and layout.
 npm run lint
 npm run build
 npm run test:i18n
+npm run test:ui
 ```

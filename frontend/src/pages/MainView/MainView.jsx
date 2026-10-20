@@ -9,6 +9,7 @@
  * version updates, and performed-workout writes.
  */
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import {
   Activity, ArrowRight, ArrowUp,
@@ -30,6 +31,7 @@ import { getUserRoutine, saveUserRoutine, setSessionKey } from '../../hooks/sess
 import { toRoutinePlan, toWorkoutRoutine } from '../../features/RoutineMaker/routine-data/routineData'
 import { useWorkoutSession } from '../../features/RoutineView/workout-session/useWorkoutSession'
 import { saveWorkout } from '../../features/RoutineView/workout-session/workoutApi'
+import AdaptiveDialog from '../../components/AdaptiveDialog/AdaptiveDialog'
 
 /**
  * Explains the workspace's specialist routing and saved-routine behavior.
@@ -39,18 +41,7 @@ import { saveWorkout } from '../../features/RoutineView/workout-session/workoutA
  */
 function HelpDialog({ onClose }) {
   const { t } = useTranslation()
-  const dialogRef = useRef(null)
-  useEffect(() => {
-    // 1. Enter the native modal focus boundary when guidance mounts.
-    const dialog = dialogRef.current
-    dialog.showModal()
-    // 2. Release modal state when parent-owned visibility removes it.
-    return () => dialog.close()
-  }, [])
-
-  return <dialog ref={dialogRef} className="help-dialog" aria-labelledby="help-title"
-    onCancel={(event) => { event.preventDefault(); onClose() }}
-    onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return <AdaptiveDialog className="help-dialog" aria-labelledby="help-title" onClose={onClose}>
     <section className="help-modal">
       <button className="icon-button modal-close" aria-label={t('Close guidance')} autoFocus onClick={onClose}><X size={20} /></button>
       <BrandMark /><h2 id="help-title">{t('Meet your new training partner.')}</h2>
@@ -60,7 +51,7 @@ function HelpDialog({ onClose }) {
       <p>{t('Exercise explanations include interactive cards with images, instructions, and coach insights. Other responses use Markdown.')}</p>
       <button className="primary-button" onClick={onClose}>{t('Got it')} <ArrowRight size={16} /></button>
     </section>
-  </dialog>
+  </AdaptiveDialog>
 }
 
 /**
@@ -407,6 +398,7 @@ function MainView({ user, onSwitchUser }) {
   // Hide rather than unmount the shell during outages, preserving drafts for recovery.
   return <>{backendDown && <FailingView onRetry={() => setBackendDown(false)} />}
     <div className={`app-shell${tab === 'chat' ? ' chat-shell' : ''}`} style={backendDown ? { display: 'none' } : undefined}>
+    <a className="skip-link" href="#workspace-content">{t('Skip to main content')}</a>
     <aside className="sidebar">
       <a className="brand" href="#chat" onClick={() => setTab('chat')}><BrandMark /><span>form<span className="brand-period">.</span></span></a>
       <div className="workspace-label">{t('YOUR PERSONAL COACH')}</div>
@@ -416,9 +408,9 @@ function MainView({ user, onSwitchUser }) {
       <div className="sidebar-bottom"><button className="help-button" onClick={() => setHelp(true)}><CircleHelp size={18} />{t('A little guidance')}<ArrowRight size={15} /></button><button type="button" className="profile user-profile" aria-label={t('Change user: {{name}}', { name: user.username })} aria-haspopup="dialog" onClick={() => setUserDialog(true)}><span className="avatar">{initials}</span><div><strong>{user.username}</strong><span>{t('Your fitness journey')}</span></div><span className="profile-status" /></button></div>
     </aside>
     <div className="main-shell">
-      <header className="topbar"><div className="breadcrumbs">{t('Your workspace')}<ChevronRight size={14} /><strong>{t(tab === 'chat' ? 'AI Chat' : 'My Routine')}</strong></div><div className="topbar-right"><WorkflowMonitor trace={trace} /><span className="private-label"><span className="status-dot" />{t('Your space to grow')}</span><LanguageToggle /><ThemeToggle /><button type="button" className="header-avatar user-avatar" aria-label={t('Change user: {{name}}', { name: user.username })} aria-haspopup="dialog" onClick={() => setUserDialog(true)}>{initials}</button></div></header>
+      <header className="topbar"><div className="breadcrumbs">{t('Your workspace')}<ChevronRight size={14} /><strong>{t(tab === 'chat' ? 'AI Chat' : 'My Routine')}</strong></div><div className="topbar-right"><WorkflowMonitor trace={trace} /><span className="private-label"><span className="status-dot" />{t('Your space to grow')}</span><LanguageToggle /><ThemeToggle /><button type="button" className="icon-button" aria-label={t('A little guidance')} aria-haspopup="dialog" onClick={() => setHelp(true)}><CircleHelp size={20} aria-hidden="true" /></button><button type="button" className="header-avatar user-avatar" aria-label={t('Change user: {{name}}', { name: user.username })} aria-haspopup="dialog" onClick={() => setUserDialog(true)}>{initials}</button></div></header>
       {tab === 'chat' ? <div className="chat-layout">
-        <main className="chat-main">
+        <main className="chat-main" id="workspace-content" tabIndex={-1}>
           <div className="chat-scroll-area" ref={conversationRef} tabIndex={0} role="region" aria-label={t('AI Chat')}>
           <div className="chat-intro"><div className="intro-kicker"><Sparkles size={15} /> {t('A LITTLE GUIDANCE. A LOT OF POTENTIAL.')}</div><h1>{t('Your goals. A smarter plan')}<span>.</span></h1><p>{t('Meet your AI coach. Built to understand you, designed to move you forward.')}</p></div>
           <div className="conversation-header"><span><span className="status-dot" />{t(messages.length ? 'Let’s build your next chapter' : 'A fresh start')}</span><button className="icon-button" aria-label={t('Start a new conversation')} title={t('Start a new conversation')} onClick={newChat} disabled={pending}><RotateCcw size={15} /></button></div>
@@ -443,7 +435,7 @@ function MainView({ user, onSwitchUser }) {
           </div>
         </main>
         <TrainingPanel key={user.id} userId={user.id} routineRevision={activeRoutine} onOpen={openRoutine} onPrompt={askCoach} />
-      </div> : <main className="routine-main">
+      </div> : <main className="routine-main" id="workspace-content" tabIndex={-1}>
         {routineLoading ? <p role="status">{t('Loading your routine…')}</p> :
           routineError ? <div role="alert" className="error-message"><AlertCircle size={16} aria-hidden="true" /><span>{t('Could not load routine: {{message}}', { message: routineError })}</span><button type="button" className="retry-button" onClick={loadActiveRoutine}>{t('Retry')}</button></div> :
             workout ? <RoutineView key={`${activeRoutineId}:${JSON.stringify(activeRoutine)}`} routine={workout} setRoutine={setWorkout} onAsk={askCoach} onSave={() => { setWorkoutSaved(true); setWorkoutUpdated(false) }} onUpdate={updateWorkout} onFinishWorkout={activeRoutineId ? finishWorkout : undefined} workoutSession={workoutSession} weightUnit={user.weight_unit ?? 'kg'} saved={workoutSaved} savedMessage={workoutUpdated ? 'Routine updated and selected as your active routine.' : 'Changes saved for this session.'} /> :
@@ -451,8 +443,10 @@ function MainView({ user, onSwitchUser }) {
       </main>}
       <footer className="app-footer"><span>{t('Made for the long run.')}</span><span>{t('FORM / YOUR PERSONAL AI COACH')}</span></footer>
     </div>
-    {help && <HelpDialog onClose={() => setHelp(false)} />}
-    {userDialog && <UserDialog user={user} onSwitch={onSwitchUser} onClose={() => setUserDialog(false)} />}
+    <AnimatePresence>
+      {help && <HelpDialog key="help" onClose={() => setHelp(false)} />}
+      {userDialog && <UserDialog key="user" user={user} onSwitch={onSwitchUser} onClose={() => setUserDialog(false)} />}
+    </AnimatePresence>
   </div></>
 }
 

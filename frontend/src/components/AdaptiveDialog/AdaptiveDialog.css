@@ -1,0 +1,59 @@
+html:has(.adaptive-dialog[open]) { overflow: hidden; }
+
+dialog.adaptive-dialog {
+  --dialog-offset: 100%;
+  position: fixed;
+  inset: auto 0 0;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  max-block-size: calc(100dvh - 1rem);
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem 1rem 0 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+dialog.adaptive-dialog::backdrop { background: rgb(0 0 0 / .75); }
+
+.adaptive-dialog > form,
+.adaptive-dialog > .help-modal {
+  inline-size: 100%;
+  max-inline-size: none;
+  max-block-size: none;
+  margin: 0;
+  padding: 1.5rem;
+  padding-block-end: max(1.5rem, env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+}
+
+.adaptive-dialog .modal-close { position: static; margin-inline-start: auto; }
+.adaptive-dialog :is(h2, h3) { padding-inline-end: 0; line-height: 1.35; }
+.adaptive-dialog :is(p, label, input, select, button) { font-size: 1rem; }
+.adaptive-dialog p { line-height: 1.7; }
+.adaptive-dialog .button-group { display: flex; flex-direction: column; gap: .75rem; }
+.adaptive-dialog .button-group > button { inline-size: 100%; }
+.adaptive-dialog :is(input, select) { min-inline-size: 0; max-inline-size: 100%; }
+
+@media (min-width: 48rem) {
+  dialog.adaptive-dialog {
+    --dialog-offset: .75rem;
+    inset: 0;
+    max-inline-size: min(42rem, calc(100% - 3rem));
+    max-block-size: calc(100dvh - 3rem);
+    block-size: fit-content;
+    margin: auto;
+    border-radius: 1rem;
+  }
+  .adaptive-dialog .button-group { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
+  .adaptive-dialog .button-group > button { inline-size: auto; }
+}

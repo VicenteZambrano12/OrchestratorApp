@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules/
 dist/
 dist-ssr/
+playwright-report/
+test-results/
 *.local
 
 # Local VS Code configuration (keep recommended extensions)

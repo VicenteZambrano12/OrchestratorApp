@@ -11,6 +11,7 @@
  * (not SSE or WebSockets), and request-time failure presentation.
  */
 import { useEffect, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import AppSkeleton from './components/AppSkeleton/AppSkeleton'
 import MainView from './pages/MainView/MainView'
 import FailingView from './pages/FailingView/FailingView'
@@ -18,6 +19,7 @@ import { checkHealth } from './hooks/health/health'
 import { useSession } from './hooks/session/session'
 import { useTranslation } from 'react-i18next'
 import { createLogger, errorType } from './lib/observability/logger'
+import StartupScreen from './components/StartupScreen/StartupScreen'
 
 const logger = createLogger('app')
 
@@ -45,37 +47,39 @@ function App() {
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    // 1. Give each health-check attempt its own cancellation boundary.
     const controller = new AbortController()
-    // 2. Check /health; the API utility enforces its timeout and healthy payload.
     checkHealth(controller.signal)
-      .then(() => setStatus('ready'))
+      .then(() => {
+        if (!controller.signal.aborted) setStatus('ready')
+      })
       .catch((error) => {
-        // 3. Report genuine failures, not cancellation during effect cleanup.
         if (!controller.signal.aborted) {
           logger.error('app.health_failed', { error_type: errorType(error) })
           setStatus('failed')
         }
       })
-    // 4. Cancel pending work on unmount or before the next retry starts.
     return () => controller.abort()
   }, [attempt])
 
-  // Backend recovery wins when both independent startup prerequisites fail.
-  if (status === 'failed') return <FailingView onRetry={() => {
-    // 1. Restore the loading gate while backend readiness is re-evaluated.
+  function retryHealth() {
     setStatus('checking')
-    // 2. Schedule a fresh health check without restarting session initialization.
     setAttempt((n) => n + 1)
-  }} />
-  // Session retry belongs to useSession and does not repeat a successful health check.
-  if (session.error) return <main className="help-modal">
-    <p role="alert">{t('Could not initialize user session: {{message}}', { message: t(session.error) })}</p>
-    <button className="primary-button" onClick={session.retry}>{t('Retry')}</button>
-  </main>
-  if (status === 'checking' || !session.user) return <AppSkeleton />
-  // Remount on user identity changes to reset user-scoped conversation/workout state.
-  return <MainView key={session.user.id} user={session.user} onSwitchUser={session.switchUser} />
+  }
+
+  let view
+  // Backend failure takes precedence; each recovery action retries only its owner.
+  if (status === 'failed') {
+    view = <FailingView key="backend" onRetry={retryHealth} />
+  } else if (session.error) {
+    view = <StartupScreen key="session" kind="session" message={t(session.error)} onRetry={session.retry} />
+  } else if (status === 'checking' || !session.user) {
+    view = <AppSkeleton key="loading" />
+  } else {
+    // Preserve the user identity boundary for all user-scoped workspace state.
+    view = <MainView key={session.user.id} user={session.user} onSwitchUser={session.switchUser} />
+  }
+
+  return <AnimatePresence mode="wait" initial={false}>{view}</AnimatePresence>
 }
 
 export default App

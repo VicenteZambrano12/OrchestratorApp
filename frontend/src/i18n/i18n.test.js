@@ -361,8 +361,10 @@ test('routine JSON renders localized metadata, day tabs and exercise tables inst
         assert.equal((markup.match(/role="tab"/g) || []).length, count)
         assert.equal((markup.match(/aria-selected="true"/g) || []).length, 1)
         assert.match(markup, /role="tabpanel"/)
-        assert.match(markup, /<table>/)
-        assert.match(markup, /<td>4<\/td><td>8-12<\/td><td>90s<\/td>/)
+        assert.match(markup, /<table role="table">/)
+        for (const [label, value] of [['SETS', '4'], ['REPS', '8-12'], ['Rest', '90s']]) {
+          assert.ok(markup.includes(`<td role="cell"><span class="routine-maker-cell-label">${translations.default.t(label)}</span>${value}</td>`))
+        }
         assert.ok(markup.includes(language === 'es' ? 'Días de entrenamiento' : 'Training days'))
         assert.ok(markup.includes(language === 'es' ? 'Explicar Catalog Press' : 'Explain Catalog Press'))
         assert.equal(markup.split(routine.summary).length - 1, 1)

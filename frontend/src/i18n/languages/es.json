@@ -1,8 +1,12 @@
 {
+  "Skip to main content": "Saltar al contenido principal",
+  "Session unavailable": "Sesión no disponible",
+  "Checking the server and preparing your session.": "Comprobando el servidor y preparando tu sesión.",
   "Something went wrong": "Algo sali\u00f3 mal",
   "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.": "La aplicaci\u00f3n encontr\u00f3 un error inesperado. Recarga para volver a intentarlo. Los cambios sin guardar pueden perderse.",
   "Reload app": "Recargar aplicaci\u00f3n",
   "SYSTEM MAP": "MAPA DEL SISTEMA",
+  "Database": "Base de datos",
   "Database source": "Origen de datos",
   "Playing execution": "Reproduciendo ejecución",
   "Full tree always visible. Highlights advance one node per second without delaying the API.": "Árbol completo siempre visible. Los nodos se resaltan cada segundo sin retrasar la API.",

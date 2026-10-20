@@ -1,5 +1,24 @@
 # OrchestratorApp
 
+## Frontend startup UI
+
+`frontend/src/App.jsx` gates the workspace on independent backend-health and
+user-session checks. Backend failure takes precedence; Retry repeats only the
+failed prerequisite. Changing users still remounts the workspace.
+
+The shared `StartupScreen` provides dark, mobile-first loading and recovery
+pages, localized EN/ES controls, 44px minimum touch targets, wrapping error text,
+and keyboard focus on recovery headings. Framer Motion coordinates screen
+entry/exit with `AnimatePresence`; reduced-motion preferences disable movement
+and skeleton pulsing. These are full-page states, not dismissible dialogs.
+The workspace shares the same responsive and accessibility standards; see
+[frontend UI guidance](frontend/README.md#responsive-ui-and-accessibility).
+
+From `frontend`, run `npm ci`, `npx playwright install chromium`, and
+`npm run test:startup` to validate startup at 375, 768, 1024, and 1440px.
+The browser suite also covers contrast, 200% text, long error messages, keyboard
+focus, motion preferences, prerequisite gating, and independent recovery.
+
 ## Backend structure
 
 T

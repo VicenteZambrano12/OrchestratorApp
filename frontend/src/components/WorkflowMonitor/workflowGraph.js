@@ -35,17 +35,14 @@ const stages = [
   ['routine_updater', 'Updating your routine preview', 'routine_routing', 0, 6],
   ['routine_save', 'Saving your confirmed routine', 'routine_routing', 0, 7],
   ['routine_sql', 'SQL query', 'routine_context', 0, 8, 'sql'],
-  ['routine_source', 'Database source', 'routine_sql', 0, 9, 'source'],
   ['exercise_catalog', 'Searching the exercise catalog', 'exercise_explainer', 1, 3],
   ['exercise_sql', 'SQL query', 'exercise_catalog', 1, 4, 'sql'],
-  ['exercise_source', 'Database source', 'exercise_sql', 1, 5, 'source'],
   ['exercise_explanation', 'Preparing an exercise explanation', 'exercise_catalog', 1, 6],
   ['past_day_exercise', 'Loading your last training day', 'past_routines_analyzer', 2, 3],
   ['compare_last_two_workouts', 'Comparing your last two workouts', 'past_routines_analyzer', 2, 4],
   ['weekly_performance', 'Reviewing your weekly performance', 'past_routines_analyzer', 2, 5],
   ['history_search', 'Searching your logged workout data', 'past_routines_analyzer', 2, 6],
   ['history_sql', 'SQL query', 'history_search', 2, 7, 'sql'],
-  ['history_source', 'Database source', 'history_sql', 2, 8, 'source'],
   ['history_explanation', 'Summarizing your training results', 'history_search', 2, 9],
 ]
 
@@ -67,7 +64,7 @@ function sqlGroup(parent) {
  */
 export function graphNodeId(step) {
   if (step.kind === 'sql') return `${sqlGroup(step.parent)}_sql`
-  if (step.kind === 'source') return `${sqlGroup(step.parent)}_source`
+  if (step.kind === 'source') return 'database'
   if (step.id.startsWith('exercise_explanation_')) return 'exercise_explanation'
   return step.id
 }
@@ -95,7 +92,8 @@ export function playbackEvents(steps, status) {
  * @param {WorkflowTrace['status']} status - Visual playback status.
  * @returns {{nodes: Array<{id: string, label: string, parent?: string, kind?: string,
  * x: number, y: number, state: string, sql?: string, source?: string}>,
- * height: number, width: number}} Fixed geometry and observed node states.
+ * edges: Array<{id: string, from: string, to: string, state: string}>,
+ * height: number, width: number}} Fixed geometry and observed node/connection states.
  */
 export function buildWorkflowGraph(events, status) {
   /**
@@ -120,9 +118,12 @@ export function buildWorkflowGraph(events, status) {
       id, label, parent, kind, x: x(column), y: y(row),
     })),
     { id: 'response', label: 'Your response is ready', parent: 'orchestrator', x: 520, y: y(10) },
+    { id: 'database', label: 'Database', kind: 'source', x: x(0), y: y(0) },
   ].map((node) => ({ ...node, state: 'idle' }))
   const byId = new Map(nodes.map((node) => [node.id, node]))
+  const visitedSources = new Set()
   let last = null
+  let lastSource = null
   let previousStage = 'orchestrator'
   for (const event of events) {
     const id = graphNodeId(event)
@@ -134,13 +135,23 @@ export function buildWorkflowGraph(events, status) {
     node.state = 'done'
     node.sql = event.sql
     node.source = event.source
-    if (event.kind === 'source') node.label = event.source
+    lastSource = event.kind === 'source' ? `${sqlGroup(event.parent)}_sql` : null
+    if (lastSource) visitedSources.add(lastSource)
     if (!event.kind && id !== 'request') previousStage = id
     last = node
   }
   if (last && status === 'running') last.state = 'active'
   if (last && status === 'failed') last.state = 'failed'
-  return { nodes, height: 1160, width: 1340 }
+  const edges = [
+    ...nodes.filter(({ parent }) => parent).map((node) => ({
+      id: node.id, from: node.parent, to: node.id, state: node.state,
+    })),
+    ...nodes.filter(({ kind }) => kind === 'sql').map((node) => ({
+      id: `${node.id}-database`, from: node.id, to: 'database',
+      state: visitedSources.has(node.id) ? node.id === lastSource ? byId.get('database').state : 'done' : 'idle',
+    })),
+  ]
+  return { nodes, edges, height: 1160, width: 1340 }
 }
 
 /**
