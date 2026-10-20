@@ -1,5 +1,14 @@
+/**
+ * @file Startup placeholder matching the workspace shell while App waits for
+ * backend health and user-session initialization. Skeleton animation is CSS-owned.
+ */
 import { useTranslation } from 'react-i18next'
 
+/**
+ * Renders a localized busy status without mounting user-dependent features.
+ * Accepts no props; reads translation context and owns no asynchronous state.
+ * @returns {import('react').ReactElement} Accessible loading shell.
+ */
 export default function AppSkeleton() {
   const { t } = useTranslation()
   return <div className="app-shell skeleton-shell" role="status" aria-busy="true" aria-label={t('Loading your workspace')}>

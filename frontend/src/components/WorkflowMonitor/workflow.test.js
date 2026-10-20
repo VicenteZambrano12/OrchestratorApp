@@ -1,3 +1,8 @@
+/**
+ * @file Regression tests for orchestrator graph mapping, fragmented NDJSON, and
+ * the live-monitor popup lifecycle. Browser state is isolated with happy-dom;
+ * mocked transport verifies progress visualization never delays the API result.
+ */
 import assert from 'node:assert/strict'
 import { after, before, mock, test } from 'node:test'
 import { act, createElement } from 'react'
@@ -59,6 +64,11 @@ test('NDJSON keeps SQL metadata across fragmented chunks and rejects invalid met
     '\n' + JSON.stringify({ type: 'result', data: { subsystem: 'exercise_explainer', response: 'Ready' } })
   const encoder = new TextEncoder()
   const response = new Response(new ReadableStream({
+    /**
+     * Splits events across arbitrary chunk boundaries to exercise the line buffer.
+     * @param {ReadableStreamDefaultController<Uint8Array>} controller - Test byte stream.
+     * @returns {void}
+     */
     start(controller) {
       for (let i = 0; i < text.length; i += 13) controller.enqueue(encoder.encode(text.slice(i, i + 13)))
       controller.close()
@@ -155,6 +165,11 @@ test('pop-out reports blocking, updates live, follows theme/language, reopens an
   const child = new Window()
   let closed = false
   child.close = () => { closed = true }
+  /**
+   * Publishes a new request snapshot to the mounted popup launcher.
+   * @param {object} trace - Test execution state, including partial idle fixtures.
+   * @returns {void}
+   */
   const render = (trace) => root.render(createElement(Monitor, { trace }))
   try {
     await act(async () => { await translations.setLanguage('en'); render({ steps: [], status: 'idle', query: '' }) })

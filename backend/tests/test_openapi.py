@@ -51,7 +51,8 @@ class OpenAPITests(unittest.TestCase):
                 [
                     sys.executable,
                     "-c",
-                    "import json; from app import app; print(json.dumps(app.openapi()))",
+                    "import json, logging; logging.basicConfig(); "
+                    "from app import app; print(json.dumps(app.openapi()))",
                 ],
                 cwd=directory,
                 env={**os.environ, "PYTHONPATH": str(source_path)},
@@ -60,6 +61,7 @@ class OpenAPITests(unittest.TestCase):
                 check=True,
             )
         self.assertEqual(json.loads(result.stdout), self.schema)
+        self.assertIn("Backend application initialized", result.stderr)
 
     def test_invalid_or_missing_metadata_fails_explicitly(self):
         valid = load_app_documentation().model_dump()

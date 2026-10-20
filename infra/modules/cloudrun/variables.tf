@@ -1,9 +1,17 @@
+# Inputs for deploying the combined orchestration application to Cloud Run.
+#
+# The parent environment selects an immutable container and a numeric application
+# secret version for reproducible revisions. It also supplies the existing
+# runtime identity; this module does not grant that identity data access.
+
 variable "project_id" {
-  type = string
+  type        = string
+  description = "Google Cloud project hosting the public application service."
 }
 
 variable "region" {
-  type = string
+  type        = string
+  description = "Google Cloud region in which the application service and revisions run."
 }
 
 variable "service_name" {
@@ -53,5 +61,6 @@ variable "secret_version" {
 }
 
 variable "common_labels" {
-  type = map(string)
+  type        = map(string)
+  description = "Shared ownership and environment labels merged with the app component label on the Cloud Run service."
 }

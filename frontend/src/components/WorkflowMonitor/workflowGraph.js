@@ -1,3 +1,26 @@
+/**
+ * @file Pure execution-trace adapter for the user-visible orchestrator system map.
+ * A fixed full tree preserves architectural context while observed events determine
+ * visited/active/failed highlights. SQL/source events are inspection metadata,
+ * not a representation of private model reasoning.
+ *
+ * @typedef {object} WorkflowStep
+ * @property {string} id - Stage identifier from the stream or synthesized playback.
+ * @property {string} label - Public execution label.
+ * @property {'sql'|'source'} [kind] - Optional inspection-node category.
+ * @property {string} [parent] - Owning execution stage.
+ * @property {string} [sql] - SQL template, without bound values/database rows.
+ * @property {string} [source] - Database/source label.
+ *
+ * @typedef {object} WorkflowTrace
+ * @property {string} [id] - Request identity used to reset playback.
+ * @property {string} query - Submitted user prompt.
+ * @property {WorkflowStep[]} steps - Observed execution stages.
+ * @property {'idle'|'running'|'complete'|'failed'} status - Actual request status.
+ * @property {string} error - Visible request error, if any.
+ * @property {object} [response] - Most recent response snapshot.
+ * @property {Array<{endpoint: string, data: object}>} [responses] - Response history for the inspector.
+ */
 export const branches = [
   { id: 'routine_maker', label: 'Routine maker' },
   { id: 'exercise_explainer', label: 'Exercise explainer' },
@@ -26,12 +49,22 @@ const stages = [
   ['history_explanation', 'Summarizing your training results', 'history_search', 2, 9],
 ]
 
+/**
+ * Selects the fixed SQL/source branch for a streamed parent identifier.
+ * @param {string} [parent] - Owning execution stage.
+ * @returns {'routine'|'exercise'|'history'} Inspection branch prefix.
+ */
 function sqlGroup(parent) {
   if (parent?.startsWith('routine')) return 'routine'
   if (parent?.startsWith('exercise')) return 'exercise'
   return 'history'
 }
 
+/**
+ * Maps dynamic progress IDs to stable nodes in the full architecture tree.
+ * @param {WorkflowStep} step - Observed or synthesized event.
+ * @returns {string} Fixed node ID, or the original stage ID.
+ */
 export function graphNodeId(step) {
   if (step.kind === 'sql') return `${sqlGroup(step.parent)}_sql`
   if (step.kind === 'source') return `${sqlGroup(step.parent)}_source`
@@ -39,6 +72,12 @@ export function graphNodeId(step) {
   return step.id
 }
 
+/**
+ * Expands observed stages into visual events with request and SQL-source nodes.
+ * @param {WorkflowStep[]} steps - Actual execution events.
+ * @param {WorkflowTrace['status']} status - Actual request status.
+ * @returns {WorkflowStep[]} Ordered visual events; empty while idle.
+ */
 export function playbackEvents(steps, status) {
   if (status === 'idle') return []
   return [
@@ -50,8 +89,26 @@ export function playbackEvents(steps, status) {
   ]
 }
 
+/**
+ * Builds the full tree and overlays only the execution events revealed so far.
+ * @param {WorkflowStep[]} events - Visible playback prefix.
+ * @param {WorkflowTrace['status']} status - Visual playback status.
+ * @returns {{nodes: Array<{id: string, label: string, parent?: string, kind?: string,
+ * x: number, y: number, state: string, sql?: string, source?: string}>,
+ * height: number, width: number}} Fixed geometry and observed node states.
+ */
 export function buildWorkflowGraph(events, status) {
+  /**
+   * Positions a specialist column in the fixed graph.
+   * @param {number} column - Zero-based column.
+   * @returns {number} Horizontal coordinate.
+   */
   const x = (column) => 25 + column * 330
+  /**
+   * Positions a stage row with consistent vertical spacing.
+   * @param {number} row - Zero-based row.
+   * @returns {number} Vertical coordinate.
+   */
   const y = (row) => 20 + row * 104
   const nodes = [
     { id: 'request', label: 'User request', x: 520, y: y(0) },
@@ -86,6 +143,12 @@ export function buildWorkflowGraph(events, status) {
   return { nodes, height: 1160, width: 1340 }
 }
 
+/**
+ * Fits the entire fixed tree inside the measured viewport without cropping.
+ * @param {{width: number, height: number}} size - Available viewport dimensions.
+ * @param {{width: number, height: number}} graph - Fixed tree dimensions.
+ * @returns {number} Non-negative uniform scale; zero until viewport measurement.
+ */
 export function fitWorkflowGraph(size, graph) {
   return Math.max(0, Math.min(size.width / graph.width, size.height / graph.height))
 }

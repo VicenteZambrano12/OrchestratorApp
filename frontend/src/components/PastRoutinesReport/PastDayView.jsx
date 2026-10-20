@@ -1,8 +1,22 @@
+/**
+ * @file Last-workout report view deriving set-level and muscle-level visualizations.
+ * All statistics come from provided backend history rows; this module does not
+ * fetch data or infer missing exertion measurements.
+ */
 import { BarChart3, Dumbbell, Flame, Gauge, Layers, ListChecks, Repeat } from 'lucide-react'
 import { MUSCLE_COLORS, groupExercises, muscleDistribution, muscleLabel, rpeTone, summarize, weightUnit } from '../../features/PastRoutinesReport/report-data/reportData'
 import { useReportFormat } from '../../features/PastRoutinesReport/report-data/useReportFormat'
 import { KpiStrip, MuscleChip, ReportSection } from './ReportParts'
 
+/**
+ * Renders a performed set with a relative-load indicator and optional RPE.
+ * @param {object} props - Set row properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').ReportRow} props.row - Backend set measurements.
+ * @param {number} props.maxLoad - Exercise-local normalization maximum.
+ * @param {string} props.unit - Display load unit.
+ * @param {boolean} props.bodyweight - Uses reps instead of external load for bar width.
+ * @returns {import('react').ReactElement} Set measurements with semantic intensity.
+ */
 function SetRow({ row, maxLoad, unit, bodyweight }) {
   const { t, number, weight } = useReportFormat()
   const load = bodyweight ? row.reps || 0 : row.weight || 0
@@ -21,6 +35,14 @@ function SetRow({ row, maxLoad, unit, bodyweight }) {
   </li>
 }
 
+/**
+ * Displays ordered sets and aggregate measurements for one exercise.
+ * @param {object} props - Exercise section properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').ExerciseGroup} props.exercise - Grouped set statistics.
+ * @param {number} props.index - Zero-based display position.
+ * @param {string} props.unit - Load unit.
+ * @returns {import('react').ReactElement} Exercise header and performed-set list.
+ */
 function ExerciseBlock({ exercise, index, unit }) {
   const { t, number, weight } = useReportFormat()
   const maxLoad = Math.max(0, ...exercise.sets.map((row) => (exercise.bodyweight ? row.reps || 0 : row.weight || 0)))
@@ -39,6 +61,12 @@ function ExerciseBlock({ exercise, index, unit }) {
   </article>
 }
 
+/**
+ * Builds a single-workout report using locale-bound formatting.
+ * @param {object} props - Report properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').ReportRow[]} props.rows - Performed-set data.
+ * @returns {import('react').ReactElement} KPIs, muscle split, exercises, and measured-volume chart.
+ */
 export default function PastDayView({ rows }) {
   const { t, number } = useReportFormat()
   const unit = weightUnit(rows)

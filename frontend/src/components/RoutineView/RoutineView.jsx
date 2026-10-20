@@ -1,3 +1,8 @@
+/**
+ * @file Interactive routine workspace composing target editing, exercise selection,
+ * local workout timing, and confirmation dialogs. Planned targets and performed
+ * sets stay separate; persistence is delegated through callbacks from MainView.
+ */
 import { Fragment, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, Check, CheckCheck, Clock3, Dumbbell, GripVertical, Play, Plus, Sparkles, Square, Target, Trash2 } from 'lucide-react'
@@ -11,9 +16,28 @@ import RoutineUpdateDialog from './RoutineUpdateDialog'
 import WorkoutFinishDialog from './WorkoutFinishDialog'
 import './RoutineView.css'
 
+/**
+ * Renders a controlled routine with a day locked while a workout is active.
+ * Requires translations; local state tracks selection, dialogs, and save feedback.
+ * Legacy routines permit workout logging but disable structural editing.
+ * @param {object} props - Routine workspace properties.
+ * @param {import('../../features/RoutineMaker/routine-data/routineData').WorkoutRoutine} props.routine - Controlled draft.
+ * @param {Function} props.setRoutine - Publishes immutable draft changes.
+ * @param {(prompt: string) => void} props.onAsk - Opens AI chat with an adjustment prompt.
+ * @param {Function} [props.onSave] - Optional locally valid draft notification.
+ * @param {Function} [props.onUpdate] - Persists a routine version; rejection keeps editing open.
+ * @param {Function} [props.onFinishWorkout] - Persists normalized actual sets before session teardown.
+ * @param {ReturnType<import('../../features/RoutineView/workout-session/useWorkoutSession').useWorkoutSession>} props.workoutSession - Shared active-session state/actions.
+ * @param {string} [props.weightUnit='kg'] - Display unit; does not convert stored loads.
+ * @param {boolean} [props.saved] - Whether to display routine save feedback.
+ * @param {string} [props.error] - Parent-owned persistence error.
+ * @param {string} [props.savedMessage='Changes saved on this device.'] - Save feedback translation key.
+ * @returns {import('react').ReactElement} Routine editor, workout controls, and active dialogs.
+ */
 export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpdate, onFinishWorkout, workoutSession: session, weightUnit = 'kg', saved, error, savedMessage = 'Changes saved on this device.' }) {
   const { t } = useTranslation()
   const [selectedDayIndex, setDayIndex] = useState(0)
+  // Exercise/set indices must continue referring to the same day until it is saved.
   const dayIndex = session.isWorkoutActive ? session.dayIndex : selectedDayIndex
   const [exerciseDialog, setExerciseDialog] = useState(null)
   const [confirmUpdate, setConfirmUpdate] = useState(false)
@@ -28,97 +52,162 @@ export default function RoutineView({ routine, setRoutine, onAsk, onSave, onUpda
     useWorkoutEditor({ routine, dayIndex, setRoutine, onSave })
   const day = routine.days[dayIndex]
   const complete = day.exercises.filter((exercise) => exercise.completed).length
+  // Completion is exercise-level; only filled sets from Done exercises may be saved.
   const completedSets = session.isWorkoutActive ? filledWorkoutSets(session.sets.filter((set) => day.exercises[set.exerciseIndex].completed)) : []
   const workoutValidation = session.isWorkoutActive && complete > 0 ? workoutSetsError(completedSets) : ''
   const nextExercise = day.exercises.findIndex((exercise) => !exercise.completed)
   const suggestions = [...new Map(routine.days.flatMap((item) => item.exercises.map((exercise) => [exercise.name, exercise]))).values()]
 
+  /** @returns {void} Requests version-save confirmation only for a valid edited routine. */
   function finishEditing() {
+    // 1. Keep persistence explicit; otherwise let editor validation govern mode exit.
     if (isEditing && onUpdate && !validation) setConfirmUpdate(true)
     else toggleEditing()
   }
 
+  /** @returns {void} Closes version confirmation and restores the triggering control's focus. */
   function closeUpdate() {
     setConfirmUpdate(false)
     editButtonRef.current?.focus()
   }
 
+  /**
+   * Persists the current draft before leaving edit mode.
+   * @returns {Promise<void>} Rejects to RoutineUpdateDialog so edits remain recoverable.
+   */
   async function updateRoutine() {
+    // 1. Let the parent save a new backend version before changing editor state.
     await onUpdate(routine)
+    // 2. Exit and restore focus only after confirmed persistence.
     toggleEditing()
     closeUpdate()
   }
 
+  /**
+   * Changes selection only outside an active workout.
+   * @param {number} index - Zero-based day index.
+   * @returns {void}
+   */
   function selectDay(index) {
+    // 1. Preserve active-session identity; clear drag state when selection changes.
     if (!session.isWorkoutActive && index !== dayIndex) {
       setDayIndex(index)
       dragIndex.current = null
     }
   }
 
+  /** @returns {void} Resets local completion and starts actual-set capture for the selected day. */
   function startWorkout() {
+    // 1. Clear previous success/completion without modifying planned targets.
     setWorkoutRecorded(false)
     setRoutine({
       ...routine,
       days: routine.days.map((item, index) => index === dayIndex
         ? { ...item, exercises: item.exercises.map((exercise) => ({ ...exercise, completed: false })) } : item),
     })
+    // 2. Lock this day and allocate performed-set inputs in the session hook.
     session.startWorkout(dayIndex, day.exercises)
   }
 
+  /** @returns {void} Closes workout confirmation and restores focus to the workout control. */
   function closeFinish() {
     setConfirmFinish(false)
     workoutButtonRef.current?.focus()
   }
 
+  /**
+   * Completes a session only after its selected actual sets have been persisted.
+   * @param {Array<{exercise_id: number, reps: number, weight: number|null}>} sets - Normalized performed sets.
+   * @returns {Promise<void>} Rejects to the dialog without clearing workout inputs.
+   */
   async function finishWorkout(sets) {
+    // 1. Keep the workout active while the parent saves its history.
     await onFinishWorkout(sets)
+    // 2. Release the day lock and show success only after the API acknowledges it.
     setDayIndex(dayIndex)
     session.finishWorkout()
     setWorkoutRecorded(true)
     closeFinish()
   }
 
+  /**
+   * Updates local completion and coordinates the exercise-specific rest timer.
+   * @param {number} index - Exercise index in the selected day.
+   * @returns {void}
+   */
   function completeExercise(index) {
+    // 1. Publish immutable completion and notify optional valid-draft consumers.
     const next = toggleExerciseCompletion(routine, dayIndex, index)
     setRoutine(next)
     if (!validation) onSave?.(next)
+    // 2. Start known rest on completion, or clear rest when its exercise is undone.
     if (session.isWorkoutActive && next.days[dayIndex].exercises[index].completed && day.exercises[index].rest !== null) session.startRest(index, day.exercises[index].rest)
     else if (session.restIndex === index) session.skipRest()
   }
 
+  /**
+   * Applies an allowed exercise move and discards index-bound rest state.
+   * @param {number|null} from - Drag source or keyboard source index.
+   * @param {number} to - Destination index.
+   * @returns {void}
+   */
   function reorder(from, to) {
+    // 1. Ignore invalid/no-op gestures before publishing a new exercise ordering.
     if (from === null || from === to || to < 0 || to >= day.exercises.length) return
     reorderExercise(from, to)
+    // 2. A rest timer cannot follow an index whose exercise has moved.
     session.skipRest()
   }
 
+  /**
+   * Opens add/swap selection and retains its trigger for accessible focus recovery.
+   * @param {import('react').MouseEvent<HTMLButtonElement>} event - Trigger activation.
+   * @param {number|null} [index=null] - Swap target; null means add.
+   * @returns {void}
+   */
   function openDialog(event, index = null) {
     dialogTrigger.current = event.currentTarget
     setExerciseDialog({ index })
   }
 
+  /** @returns {void} Closes exercise selection and restores focus to its trigger. */
   function closeDialog() {
     setExerciseDialog(null)
     dialogTrigger.current?.focus()
   }
 
+  /**
+   * Applies a selection with add defaults or editor-controlled swap resets.
+   * @param {{name: string, exerciseId: number|null, rest: string}} replacement - Selected exercise identity/timing.
+   * @returns {void}
+   */
   function confirmExercise(replacement) {
+    // 1. Add with initial targets or retain existing targets through the swap action.
     if (dialogIndex === null) addExercise({ ...replacement, sets: 3, reps: '8–12', weight: 0, completed: false, notes: '' })
     else swapExercise(dialogIndex, replacement)
+    // 2. Clear obsolete rest timing and return focus to the editor.
     session.skipRest()
     closeDialog()
   }
 
+  /**
+   * Implements roving tab focus while enforcing the active-workout day lock.
+   * @param {import('react').KeyboardEvent<HTMLButtonElement>} event - Day-tab key event.
+   * @param {number} index - Current tab index.
+   * @returns {void}
+   */
   function onTabKey(event, index) {
+    // 1. Suppress navigation keys while actual-set indices depend on the active day.
     if (session.isWorkoutActive) {
       if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) event.preventDefault()
       return
     }
+    // 2. Resolve wraparound/Home/End navigation only for supported tab keys.
     const count = routine.days.length
     const next = { ArrowRight: (index + 1) % count, ArrowLeft: (index - 1 + count) % count, Home: 0, End: count - 1 }[event.key]
     if (next === undefined) return
     event.preventDefault()
+    // 3. Synchronize selected content and keyboard focus.
     selectDay(next)
     document.getElementById(`day-tab-${next}`)?.focus()
   }

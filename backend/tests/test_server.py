@@ -148,6 +148,17 @@ class CombinedServerTests(unittest.IsolatedAsyncioTestCase):
                 server.create_app()
         self.assertEqual(marker, ["yes"])
 
+    def test_logging_reads_level_from_mounted_secrets(self):
+        secret = self.frontend / "secrets.json"
+        secret.write_text('{"LOG_LEVEL": "DEBUG"}', encoding="utf-8")
+        levels = []
+        with patch.dict(os.environ, {"APP_SECRETS_FILE": str(secret)}):
+            with patch.object(server.Logger, "configure", side_effect=lambda: levels.append(
+                os.environ.get("LOG_LEVEL"),
+            )):
+                server.create_app()
+        self.assertEqual(levels, ["DEBUG"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,13 @@
+/**
+ * @file User-scoped application workspace coordinating chat, routines, and workouts.
+ * Owns agent request lifecycles, NDJSON progress snapshots, response inspection, and
+ * recoverable failure UI. API utilities validate/normalize orchestrator responses;
+ * child views render structured specialists without taking ownership of transport.
+ *
+ * App keys this view by user ID so a profile change clears conversation, routine,
+ * and workout state. Separate cancellation refs isolate chat, routine reads,
+ * version updates, and performed-workout writes.
+ */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -21,12 +31,20 @@ import { toRoutinePlan, toWorkoutRoutine } from '../../features/RoutineMaker/rou
 import { useWorkoutSession } from '../../features/RoutineView/workout-session/useWorkoutSession'
 import { saveWorkout } from '../../features/RoutineView/workout-session/workoutApi'
 
+/**
+ * Explains the workspace's specialist routing and saved-routine behavior.
+ * @param {object} props - Guidance dialog properties.
+ * @param {() => void} props.onClose - Parent-owned dismissal.
+ * @returns {import('react').ReactElement} Localized native guidance modal.
+ */
 function HelpDialog({ onClose }) {
   const { t } = useTranslation()
   const dialogRef = useRef(null)
   useEffect(() => {
+    // 1. Enter the native modal focus boundary when guidance mounts.
     const dialog = dialogRef.current
     dialog.showModal()
+    // 2. Release modal state when parent-owned visibility removes it.
     return () => dialog.close()
   }, [])
 
@@ -45,6 +63,17 @@ function HelpDialog({ onClose }) {
   </dialog>
 }
 
+/**
+ * Renders chat/routine navigation and coordinates all user-specific backend work.
+ * Translation context supplies both UI copy and the EN/ES request language.
+ * Local state separates pending work, observed execution trace, saved routine
+ * identity, editable workout state, and error recovery; the session hook owns
+ * active workout timing/sets independently of the selected navigation tab.
+ * @param {object} props - Workspace properties.
+ * @param {import('../../hooks/session/users').UserProfile} props.user - Initialized active profile.
+ * @param {(user: import('../../hooks/session/users').UserProfile, signal?: AbortSignal) => Promise<void>} props.onSwitchUser - Activates another backend session.
+ * @returns {import('react').ReactElement} User workspace, recovery view, and optional dialogs.
+ */
 function MainView({ user, onSwitchUser }) {
   const { t, i18n } = useTranslation()
   const language = i18n.resolvedLanguage.toUpperCase()
@@ -52,15 +81,20 @@ function MainView({ user, onSwitchUser }) {
   const [tab, setTab] = useState('chat')
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
+  // One mutation gate prevents overlapping chat/reset/confirmation operations.
   const [pending, setPending] = useState(false)
   const [pendingSteps, setPendingSteps] = useState([])
+  // Keep actual execution/response data separate from the monitor's visual playback.
   const [trace, setTrace] = useState({ query: '', steps: [], status: 'idle', error: '' })
   const [savingRoutine, setSavingRoutine] = useState(false)
+  // Transport/5xx failures replace the shell; validation/timeouts remain inline.
   const [backendDown, setBackendDown] = useState(false)
   const [error, setError] = useState('')
   const [activeRoutine, setActiveRoutine] = useState(null)
+  // Persisted identity is required to attach actual sets to the correct routine version.
   const [activeRoutineId, setActiveRoutineId] = useState(null)
   const workoutSession = useWorkoutSession()
+  // Async chat callbacks must observe the latest workout lock, not a stale closure.
   const workoutActiveRef = useRef(false)
   const [workout, setWorkout] = useState(null)
   const [workoutSaved, setWorkoutSaved] = useState(false)
@@ -80,26 +114,35 @@ function MainView({ user, onSwitchUser }) {
   const workoutAbortRef = useRef(null)
 
   useEffect(() => {
+    // 1. Mirror the current workout lock for callbacks awaiting agent responses.
     workoutActiveRef.current = workoutSession.isWorkoutActive
   }, [workoutSession.isWorkoutActive])
 
   useEffect(() => () => {
+    // 1. Cancel each independent request domain when this user-scoped view unmounts.
     abortRef.current?.abort()
     routineAbortRef.current?.abort()
     updateAbortRef.current?.abort()
     workoutAbortRef.current?.abort()
   }, [])
 
+  /**
+   * Refreshes the saved routine without overwriting an active workout.
+   * @returns {void} Starts an abortable read and publishes loading/error state.
+   */
   function loadActiveRoutine() {
+    // 1. Preserve the active workout; replace only a previous routine-read request.
     if (workoutSession.isWorkoutActive) return
     routineAbortRef.current?.abort()
     const controller = new AbortController()
     routineAbortRef.current = controller
+    // 2. Expose loading and require routine metadata for future workout persistence.
     setRoutineLoading(true)
     setRoutineError('')
     getUserRoutine(user.id, controller.signal, { includeMetadata: true })
       .then(({ routine: loadedRoutine, routineId }) => {
         if (controller.signal.aborted) return
+        // 3. Keep unsaved session edits unless the backend's version/content changed.
         if (routineId !== activeRoutineId || JSON.stringify(loadedRoutine) !== JSON.stringify(activeRoutine)) {
           setWorkout(loadedRoutine ? toWorkoutRoutine(loadedRoutine) : null)
           setWorkoutSaved(false)
@@ -109,6 +152,7 @@ function MainView({ user, onSwitchUser }) {
         setActiveRoutineId(routineId)
       })
       .catch((requestError) => {
+        // 4. Discard unavailable data and show retry instead of an apparent empty plan.
         if (!controller.signal.aborted) {
           setActiveRoutine(null)
           setActiveRoutineId(null)
@@ -119,18 +163,23 @@ function MainView({ user, onSwitchUser }) {
         }
       })
       .finally(() => {
+        // 5. Only the surviving read may clear the current loading state.
         if (!controller.signal.aborted) setRoutineLoading(false)
       })
   }
 
+  /** @returns {void} Selects routine navigation and requests current persisted data. */
   function openRoutine() {
+    // 1. Navigate immediately while the routine view renders its loading boundary.
     setTab('routine')
     loadActiveRoutine()
   }
   useEffect(() => {
+    // 1. Avoid scrolling the untouched welcome state.
     if (messages.length > initialMessages.length || pending) {
       const conversation = conversationRef.current
       const latestAssistant = latestAssistantRef.current
+      // 2. Align completed replies at their start; follow the bottom during progress.
       if (!pending && messages.at(-1)?.role === 'assistant' && conversation && latestAssistant) {
         const top = conversation.scrollTop + latestAssistant.getBoundingClientRect().top - conversation.getBoundingClientRect().top
         conversation.scrollTo({ top, behavior: 'smooth' })
@@ -140,13 +189,26 @@ function MainView({ user, onSwitchUser }) {
     }
   }, [messages, pending, pendingSteps])
 
+  /**
+   * Seeds a user-reviewable prompt instead of sending a request automatically.
+   * @param {string} prompt - Suggested or exercise-specific message.
+   * @returns {void}
+   */
   function askCoach(prompt) {
+    // 1. Activate the composer with the suggested prompt.
     setInput(prompt)
     setTab('chat')
+    // 2. Wait for chat navigation to mount the input before moving focus.
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
+  /**
+   * Appends a normalized reply and synchronizes a saved plan when workout-safe.
+   * @param {import('../../features/ai-chat/api/chat').ChatResult} result - Validated API reply.
+   * @returns {void}
+   */
   function receiveResponse(result) {
+    // 1. Do not replace a routine whose indices still belong to an active workout.
     if (result.savedRoutine && !workoutActiveRef.current) {
       setLastQuery('')
       routineAbortRef.current?.abort()
@@ -158,12 +220,19 @@ function MainView({ user, onSwitchUser }) {
       setWorkoutSaved(false)
       setWorkoutUpdated(false)
     }
+    // 2. Retire older confirmations after a save and append a distinct assistant turn.
     setMessages((current) => [
       ...current.map((message) => result.savedRoutine ? { ...message, awaitingConfirmation: false } : message),
       { id: crypto.randomUUID(), role: 'assistant', ...result, demo: false },
     ])
   }
 
+  /**
+   * Records response snapshots for the live monitor, not the observability logger.
+   * @param {object} data - API response exposed to the user-facing inspector.
+   * @param {string} endpoint - Templated endpoint label.
+   * @returns {void}
+   */
   function receiveApiResponse(data, endpoint) {
     setTrace((current) => ({
       ...current, response: data,
@@ -171,17 +240,32 @@ function MainView({ user, onSwitchUser }) {
     }))
   }
 
+  /**
+   * Submits a trimmed composer message only when no mutation is pending.
+   * @param {import('react').SubmitEvent<HTMLFormElement>} event - Composer submission.
+   * @returns {void}
+   */
   function sendMessage(event) {
+    // 1. Keep submission client-side and reject empty/overlapping requests.
     event.preventDefault()
     if (!input.trim() || pending) return
+    // 2. Delegate request state and streaming to the shared turn handler.
     submitQuery(input.trim())
   }
 
+  /** @returns {void} Replays the last failed prompt without duplicating its user bubble. */
   function retryLast() {
     if (lastQuery && !pending) submitQuery(lastQuery, true)
   }
 
+  /**
+   * Runs one orchestrator turn and reconciles progress, drafts, and recoverable errors.
+   * @param {string} query - Nonempty trimmed user prompt.
+   * @param {boolean} [isRetry=false] - Reuses the existing user message.
+   * @returns {Promise<void>} Settles after completion, cancellation, or visible failure.
+   */
   async function submitQuery(query, isRetry = false) {
+    // 1. Lock the composer and reset per-turn trace/error state before backend work.
     setLastQuery(query)
     if (!isRetry) setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: query }])
     setInput('')
@@ -189,6 +273,7 @@ function MainView({ user, onSwitchUser }) {
     setPendingSteps([])
     setTrace({ id: crypto.randomUUID(), query, steps: [], status: 'running', error: '' })
     setError('')
+    // 2. Bind this turn to view cleanup and stream validated execution stages to state.
     const controller = new AbortController()
     abortRef.current = controller
     try {
@@ -196,10 +281,12 @@ function MainView({ user, onSwitchUser }) {
         setPendingSteps(steps)
         setTrace((current) => ({ ...current, steps }))
       }, receiveApiResponse)
+      // 3. Publish a completed reply only if this user-scoped request is still active.
       if (controller.signal.aborted) return
       setTrace((current) => ({ ...current, status: 'complete' }))
       receiveResponse(result)
     } catch (requestError) {
+      // 4. Preserve unsaved drafts; distinguish backend outage from inline turn errors.
       if (controller.signal.aborted) return
       setTrace((current) => ({ ...current, status: 'failed', error: requestError.message }))
       if (requestError.routineToSave) {
@@ -212,16 +299,23 @@ function MainView({ user, onSwitchUser }) {
       else if (requestError.name !== 'AbortError') setError(`${t(requestError.message)} ${t('Your message was not answered. You can retry it below.')}`)
       if (!isRetry) setInput(query)
     } finally {
+      // 5. Release the mutation gate so failures can be corrected or retried.
       setPending(false)
     }
   }
 
+  /**
+   * Resets backend conversation state before clearing the visible transcript.
+   * @returns {Promise<void>} Failed resets preserve the current conversation and show an error.
+   */
   async function newChat() {
+    // 1. Serialize reset with chat/save work and retain the current transcript.
     if (pending) return
     setPending(true)
     const controller = new AbortController()
     abortRef.current = controller
     try {
+      // 2. Clear local history only after the backend acknowledges a fresh session.
       await setSessionKey(sessionId, controller.signal, true)
       if (controller.signal.aborted) return
       setMessages([])
@@ -231,13 +325,20 @@ function MainView({ user, onSwitchUser }) {
       setError('')
       setLastQuery('')
     } catch (error) {
+      // 3. Keep history on failure and unlock only a still-mounted request.
       if (!controller.signal.aborted) setError(t('Could not initialize user session: {{message}}', { message: error.message }))
     } finally {
       if (!controller.signal.aborted) setPending(false)
     }
   }
 
+  /**
+   * Persists the selected agent draft and updates chat/save feedback.
+   * @param {import('../../features/ai-chat/api/chat').ChatResult} message - Latest confirmable draft.
+   * @returns {Promise<void>} Save errors remain visible without discarding the draft.
+   */
   async function confirmRoutine(message) {
+    // 1. Lock conversation mutations and start a dedicated save trace.
     if (pending) return
     setPending(true)
     setSavingRoutine(true)
@@ -248,25 +349,36 @@ function MainView({ user, onSwitchUser }) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
+      // 2. Confirm the exact draft, not a newly inferred plan from message text.
       const result = await requestRoutineSave(sessionId, message.routine, message.draftId, controller.signal, language, user.id, receiveApiResponse)
       if (controller.signal.aborted) return
       setTrace((current) => ({ ...current, status: 'complete' }))
       receiveResponse(result)
     } catch (requestError) {
+      // 3. Keep the confirmation actionable and mark the observed save as failed.
       if (!controller.signal.aborted) setTrace((current) => ({ ...current, status: 'failed', error: requestError.message }))
       if (!controller.signal.aborted) setError(t('Could not save routine: {{message}}', { message: requestError.message }))
     } finally {
+      // 4. Restore controls after save completion without updating an aborted view.
       setSavingRoutine(false)
       if (!controller.signal.aborted) setPending(false)
     }
   }
 
+  /**
+   * Converts edited targets and saves a new active routine version.
+   * @param {import('../../features/RoutineMaker/routine-data/routineData').WorkoutRoutine} editedRoutine - Controlled editor draft.
+   * @returns {Promise<void>} Rejects to the confirmation dialog on conversion/save failure.
+   */
   async function updateWorkout(editedRoutine) {
+    // 1. Serialize only valid catalog-backed targets, excluding actual weights/completion.
     const plan = toRoutinePlan(editedRoutine)
     const controller = new AbortController()
     updateAbortRef.current = controller
+    // 2. Require the saved version ID before allowing subsequent workout history writes.
     const { routine: saved, routineId } = await saveUserRoutine(user.id, plan, controller.signal, { includeMetadata: true })
     controller.signal.throwIfAborted()
+    // 3. Cancel stale reads before publishing the acknowledged version and feedback.
     routineAbortRef.current?.abort()
     setRoutineLoading(false)
     setRoutineError('')
@@ -276,15 +388,23 @@ function MainView({ user, onSwitchUser }) {
     setWorkoutUpdated(true)
   }
 
+  /**
+   * Records performed sets against the current saved routine/day identity.
+   * @param {Array<{exercise_id: number, reps: number, weight: number|null}>} sets - Normalized actual sets.
+   * @returns {ReturnType<import('../../features/RoutineView/workout-session/workoutApi').saveWorkout>} Save receipt.
+   */
   async function finishWorkout(sets) {
+    // 1. Preserve per-day legacy identity when available; otherwise use active version ID.
     const controller = new AbortController()
     workoutAbortRef.current = controller
     const routineId = workout.days[workoutSession.dayIndex].routineId ?? activeRoutineId
+    // 2. Resolve only after persistence so the child can safely release its workout lock.
     const result = await saveWorkout(user.id, routineId, sets, controller.signal)
     controller.signal.throwIfAborted()
     return result
   }
 
+  // Hide rather than unmount the shell during outages, preserving drafts for recovery.
   return <>{backendDown && <FailingView onRetry={() => setBackendDown(false)} />}
     <div className={`app-shell${tab === 'chat' ? ' chat-shell' : ''}`} style={backendDown ? { display: 'none' } : undefined}>
     <aside className="sidebar">

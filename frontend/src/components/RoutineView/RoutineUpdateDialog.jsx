@@ -1,6 +1,18 @@
+/**
+ * @file Confirmation boundary for versioned routine saves.
+ * In-flight state prevents duplicate writes and dismissal; save rejection remains
+ * visible in the dialog without discarding the parent-owned edited routine.
+ */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+/**
+ * Confirms a new active routine version, excluding actual workout weights/completion.
+ * @param {object} props - Dialog properties.
+ * @param {() => Promise<void>} props.onConfirm - Parent-owned save action; closes on success.
+ * @param {() => void} props.onClose - Returns to the draft without saving.
+ * @returns {import('react').ReactElement} Modal with pending and recoverable error states.
+ */
 export default function RoutineUpdateDialog({ onConfirm, onClose }) {
   const { t } = useTranslation()
   const dialogRef = useRef(null)
@@ -9,22 +21,31 @@ export default function RoutineUpdateDialog({ onConfirm, onClose }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    // 1. Open a native modal once and release it on unmount.
     const dialog = dialogRef.current
     dialog.showModal()
     return () => dialog.close()
   }, [])
 
+  /**
+   * Serializes user confirmation and reports persistence errors in place.
+   * @param {import('react').SubmitEvent<HTMLFormElement>} event - Form submission.
+   * @returns {Promise<void>} Settles after save success or visible failure.
+   */
   async function confirm(event) {
+    // 1. Lock synchronously as well as visually to prevent same-frame duplicate writes.
     event.preventDefault()
     if (inFlight.current) return
     inFlight.current = true
     setSaving(true)
     setError('')
+    // 2. Delegate persistence; parent changes edit mode only after success.
     try {
       await onConfirm()
     } catch (saveError) {
       setError(t('Could not save routine: {{message}}', { message: t(saveError.message) }))
     } finally {
+      // 3. Release both guards so failed saves can be retried.
       inFlight.current = false
       setSaving(false)
     }

@@ -1,3 +1,10 @@
+"""Define the shared JSON and terminal-stream envelope for chat results.
+
+The pipeline supplies the selected subsystem and its unchanged payload. Model
+generated explanations remain separate from catalog fields and logged rows;
+this schema performs no routing, tool execution, or LLM invocation.
+"""
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from utils.pipeline.dataclass.models import SubsystemId
@@ -7,7 +14,20 @@ from utils.past_routines_analyzer.dataclass.models import PastRoutinesAnalysis
 
 
 class ChatResponse(BaseModel):
-    """Selected subsystem and its text, routine, or database-backed exercise list."""
+    """Expose subsystem selection alongside the selected workflow's result.
+
+    Both ordinary chat responses and NDJSON terminal results use this model.
+    Unsupported questions and textual clarification requests remain successful
+    text payloads rather than a separate error schema.
+
+    Attributes:
+        subsystem (SubsystemId): One of ``routine_maker``,
+            ``exercise_explainer``, ``past_routines_analyzer``, or ``no_system``.
+        response (str | RoutineMakerResult | list[ExerciseExplanation] |
+            PastRoutinesAnalysis): Localized text, routine workflow state,
+            catalog exercises with generated explanations, or logged-workout
+            data with a generated analysis, respectively.
+    """
 
     model_config = ConfigDict(
         json_schema_extra={

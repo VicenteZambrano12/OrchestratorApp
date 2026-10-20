@@ -1,4 +1,7 @@
 {
+  "Something went wrong": "Something went wrong",
+  "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.": "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.",
+  "Reload app": "Reload app",
   "SYSTEM MAP": "SYSTEM MAP",
   "Database source": "Database source",
   "Playing execution": "Playing execution",

@@ -1,9 +1,19 @@
+/**
+ * @file Local tabbed exercise details separating agent Markdown, catalog execution
+ * steps, and overview text. Missing catalog content uses explicit translated copy.
+ */
 import { useId, useState } from 'react'
 import { Info, ListChecks, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import { parseInstructions } from '../../features/ExplainerCard/exercise-data/exerciseData'
 
+/**
+ * Shows the selected details panel using local tab state and a stable accessible ID.
+ * @param {object} props - Details properties.
+ * @param {import('../../features/ExplainerCard/exercise-data/exerciseData').Exercise} props.exercise - Validated exercise.
+ * @returns {import('react').ReactElement} Localized controls and the active detail panel.
+ */
 export default function ExerciseDetails({ exercise }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState('coach')

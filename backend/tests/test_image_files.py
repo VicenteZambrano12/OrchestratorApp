@@ -126,12 +126,15 @@ class ImageFilesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request())[0], 404)
 
     async def test_permission_and_service_errors_are_logged_and_return_503(self):
-        for error in (Forbidden("denied"), ServiceUnavailable("unavailable")):
+        for error in (Forbidden("private-denied"), ServiceUnavailable("private-unavailable")):
             self.client.bucket.return_value.get_blob.side_effect = error
-            with self.subTest(error=error), self.assertLogs(image_files.logger, level="ERROR"):
+            with self.subTest(error=error), self.assertLogs(image_files.logger, level="ERROR") as captured:
                 status, _, body = await self.request()
             self.assertEqual(status, 503)
             self.assertIn(b"Image storage is unavailable.", body)
+            self.assertIn(f"error_type={type(error).__name__}", captured.output[0])
+            self.assertNotIn("private-", "\n".join(captured.output))
+            self.assertTrue(all(record.exc_info is None for record in captured.records))
 
     async def test_missing_adc_is_explicit_and_never_falls_back_to_local_images(self):
         (self.root / "database/images/icon").mkdir()

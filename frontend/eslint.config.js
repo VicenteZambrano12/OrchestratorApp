@@ -1,3 +1,8 @@
+/**
+ * @file Flat ESLint configuration for frontend JavaScript and JSX modules.
+ * Enforces JavaScript correctness, React Hooks lifecycle rules, and Vite refresh
+ * constraints using browser globals; generated production output is excluded.
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

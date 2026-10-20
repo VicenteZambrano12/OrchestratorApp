@@ -1,8 +1,20 @@
+/**
+ * @file Read-only structured routine draft rendered inside agent conversation replies.
+ * Local day navigation previews complete new-format plans; persistence and explicit
+ * confirmation remain owned by the conversation view, not this presentation layer.
+ */
 import { useId, useState } from 'react'
 import { Calendar, Clock3, Dumbbell, HelpCircle, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import './RoutineMaker.css'
 
+/**
+ * Presents planned timing, exercise targets, and recovery guidance from an AI draft.
+ * @param {object} props - Preview properties.
+ * @param {import('../../features/RoutineMaker/routine-data/routineData').RoutinePlan} props.routine - Validated non-legacy plan.
+ * @param {(name: string) => void} [props.onExplainExercise] - Seeds a follow-up chat prompt.
+ * @returns {import('react').ReactElement} Accessible day-tabbed routine preview.
+ */
 export default function RoutineMaker({ routine, onExplainExercise }) {
   const { t } = useTranslation()
   const [activeDay, setActiveDay] = useState(0)
@@ -12,13 +24,21 @@ export default function RoutineMaker({ routine, onExplainExercise }) {
   const min = Math.min(...durations)
   const max = Math.max(...durations)
 
+  /**
+   * Implements wraparound arrow/Home/End day-tab navigation and focus alignment.
+   * @param {import('react').KeyboardEvent<HTMLButtonElement>} event - Tab key event.
+   * @param {number} index - Current zero-based tab.
+   * @returns {void}
+   */
   function onTabKey(event, index) {
+    // 1. Resolve only the keys supported by the roving-tab interaction.
     const count = routine.days.length
     const next = {
       ArrowRight: (index + 1) % count, ArrowLeft: (index - 1 + count) % count,
       Home: 0, End: count - 1,
     }[event.key]
     if (next === undefined) return
+    // 2. Prevent page scrolling and move both selected content and keyboard focus.
     event.preventDefault()
     setActiveDay(next)
     document.getElementById(`${id}-day-${next}`)?.focus()

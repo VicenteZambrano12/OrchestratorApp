@@ -1,4 +1,7 @@
 {
+  "Something went wrong": "Algo sali\u00f3 mal",
+  "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.": "La aplicaci\u00f3n encontr\u00f3 un error inesperado. Recarga para volver a intentarlo. Los cambios sin guardar pueden perderse.",
+  "Reload app": "Recargar aplicaci\u00f3n",
   "SYSTEM MAP": "MAPA DEL SISTEMA",
   "Database source": "Origen de datos",
   "Playing execution": "Reproduciendo ejecución",

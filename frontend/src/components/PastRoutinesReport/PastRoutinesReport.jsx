@@ -1,3 +1,8 @@
+/**
+ * @file Structured history-response router pairing agent Markdown with measured
+ * workout visualizations. Receives a validated analysis envelope from the chat
+ * boundary; an empty result is a valid no-history state, not a pipeline failure.
+ */
 import ReactMarkdown from 'react-markdown'
 import { CalendarDays, GitCompareArrows, Radar, SearchX } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +18,13 @@ const ROUTE_VIEWS = {
   weekly_performance: { icon: Radar, label: 'Weekly performance', View: WeeklyView },
 }
 
+/**
+ * Builds a route-specific title without inventing missing session identity.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').PastRoutinesAnalysis} analysis - Validated envelope.
+ * @param {import('i18next').TFunction} t - Current translator.
+ * @param {string} language - Date formatting locale.
+ * @returns {string} Localized report heading.
+ */
 function reportTitle(analysis, t, language) {
   const first = analysis.data[0]
   if (analysis.route === 'weekly_performance') return t('Your last 7 days')
@@ -21,6 +33,12 @@ function reportTitle(analysis, t, language) {
   return [first.training_day, formatDate(first.training_date, language, { weekday: 'long', day: 'numeric', month: 'long' })].filter(Boolean).join(' · ')
 }
 
+/**
+ * Chooses the validated history route's view and explicit empty-result presentation.
+ * @param {object} props - Report properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').PastRoutinesAnalysis} props.analysis - Validated specialist result.
+ * @returns {import('react').ReactElement} Agent explanation and route-specific report body.
+ */
 export default function PastRoutinesReport({ analysis }) {
   const { t, i18n } = useTranslation()
   const { icon: Icon, label, View } = ROUTE_VIEWS[analysis.route]

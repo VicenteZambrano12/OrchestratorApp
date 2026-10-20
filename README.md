@@ -39,6 +39,62 @@ Neither endpoint requires authentication. Provider credentials are configured
 on the server and must not be included in client requests. `/health` is a liveness
 check only: it does not validate provider readiness.
 
+### Backend logging
+
+The shared `Logger` class lives in `backend/src/obervability/logger.py`.
+Both backend entry points configure Python's standard logging at startup.
+Logs go to stdout with a timestamp, severity, module name, and message. Set
+the `LOG_LEVEL` environment variable to `DEBUG`, `INFO` (default), `WARNING`,
+`ERROR`, or `CRITICAL`; invalid values fail startup explicitly. The combined
+server also accepts this setting from its mounted runtime secrets file.
+Repeated configuration does not add duplicate handlers or replace handlers
+installed by a host or test runner.
+
+Use a module-scoped logger throughout the backend:
+
+```python
+from obervability.logger import Logger
+
+logger = Logger.get_logger(__name__)
+logger.info("Operation completed")
+logger.debug("Processed %d items", count)
+```
+
+Standard logging methods, lazy formatting, `extra`, and `logger.exception()`
+are supported. Standalone scripts can call `Logger.configure()` in their entry
+point. Retrieving a logger does not change logging configuration or add handlers.
+The Gemini diagnostic CLI retains its human-readable command output.
+
+All backend HTTP requests log their method, matched route template, status,
+and elapsed milliseconds, including streamed responses. Request failures are
+logged without changing response behavior. Raw URLs, query strings, request
+bodies, headers, and exception messages are omitted from these request logs.
+Pipeline completions log the selected subsystem; DEBUG logs cover Gemini
+operations, SQL execution, and conversation storage without including payloads,
+SQL text or parameters, session/user identifiers, or credentials. These are
+safe call-site conventions, not automatic redaction: never pass secrets or
+user content to log methods, including through exception messages.
+
+Logging also covers subsystem routing, exercise explanations, routine creation
+and confirmation, workout history analysis, profile/workout persistence,
+session initialization/deletion, image storage, and application startup.
+INFO records business outcomes; WARNING records rejected model outputs and
+retry attempt numbers. DEBUG includes workflow stage identifiers, configuration
+loading, and operation timings for service, repository, SQL transaction, and
+session-store operations. Health checks use the shared HTTP logger rather than
+adding endpoint-specific noise.
+
+For synchronous service operations, use `@Logger.trace(logger)` to record
+start/completion/failure and elapsed milliseconds at DEBUG. It preserves the
+function's signature, result, and original exception, and never logs arguments,
+return values, or exception messages. Nested operations only report failures at
+DEBUG; HTTP, image-storage, streaming, and diagnostic boundaries report failures
+at ERROR using safe exception types/status codes rather than raw tracebacks.
+Do not apply this synchronous decorator to async functions or generators.
+Forwarding endpoints, data models, and pure formatting/validation helpers rely
+on their enclosing request/service logs instead of logging every function call.
+The diagnostic CLI keeps its existing human-readable output and exit codes.
+
 ## Production image builds and Artifact Registry
 
 The original workflow ordering is preserved: a merged `dev` → `main` PR runs

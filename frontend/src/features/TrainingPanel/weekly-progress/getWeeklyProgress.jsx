@@ -1,3 +1,16 @@
+/**
+ * @file Validated seven-day activity adapter for the training sidebar.
+ * Uses UTC calendar arithmetic to avoid browser timezone shifts and rejects gaps,
+ * duplicate dates, and impossible dates instead of presenting misleading activity.
+ */
+
+/**
+ * Sorts a complete consecutive seven-day backend window and counts logged days.
+ * @param {Array<{date: string, has_routine: boolean}>} days - Backend activity rows.
+ * @returns {{completed: number, weekDays: Array<{date: string, weekdayIndex: number,
+ * isTrainingDay: boolean}>}} Monday-based weekday indices and workout presence.
+ * @throws {Error} If the payload is not seven valid, consecutive calendar days.
+ */
 export function getWeeklyProgress(days) {
   if (!Array.isArray(days) || days.length !== 7 || days.some((day) =>
     !day || typeof day.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day.date) ||

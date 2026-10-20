@@ -1,3 +1,13 @@
+# Public serving tier for the orchestration frontend and same-origin backend.
+#
+# Runs one combined application container with scale-to-zero and bounded instance
+# counts. The supplied service account accesses private images and secrets through
+# grants owned by sibling modules. A pinned JSON secret volume supplies runtime
+# settings and LLM credentials without embedding them in the container image.
+# No VPC connector or private database route is configured here.
+
+# Hosts the frontend and agent API together so browser requests use one origin;
+# zero minimum instances limits idle compute cost, not persistence requirements.
 resource "google_cloud_run_v2_service" "backend" {
   project             = var.project_id
   name                = var.service_name
@@ -12,11 +22,14 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 
   template {
+    # Uses the application identity rather than inheriting deployment privileges.
     service_account                  = var.service_account_email
     execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"
     max_instance_request_concurrency = 8
     timeout                          = "300s"
 
+    # Process-local sessions are not shared across instances and can be lost on
+    # shutdown or rollout; the instance limit is not a durable session store.
     scaling {
       min_instance_count = 0
       max_instance_count = 1
@@ -58,6 +71,8 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # Allows application initialization before routing traffic; this endpoint
+      # does not verify database or LLM availability.
       startup_probe {
         initial_delay_seconds = 0
         timeout_seconds       = 5
@@ -87,6 +102,8 @@ resource "google_cloud_run_v2_service" "backend" {
         items {
           version = var.secret_version
           path    = "orch_app_secret.json"
+          # Decimal 292 is 0444: the non-root process can read the root-owned
+          # secret file, but cannot write it.
           mode    = 292
         }
       }
@@ -103,6 +120,9 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 }
 
+# Allows browsers to reach the frontend and API without Google IAM credentials.
+# This service-scoped invoker grant does not authorize application operations;
+# endpoint authorization must be enforced by the application.
 resource "google_cloud_run_v2_service_iam_member" "public_access" {
   location = google_cloud_run_v2_service.backend.location
   project  = var.project_id

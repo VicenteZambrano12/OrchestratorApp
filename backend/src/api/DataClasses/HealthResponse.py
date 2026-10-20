@@ -1,10 +1,21 @@
+"""Describe the public liveness payload without implying dependency readiness.
+
+The health endpoint uses this model for response validation and OpenAPI output;
+it does not expose provider credentials or trigger model/database checks.
+"""
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
-    """Application liveness response; does not indicate provider readiness."""
+    """Validate the health endpoint's fixed application-liveness response.
+
+    Attributes:
+        status (Literal["ok"]): Application responsiveness indicator only;
+            it makes no claim about Gemini, storage, or configuration readiness.
+    """
 
     model_config = ConfigDict(json_schema_extra={"example": {"status": "ok"}})
 

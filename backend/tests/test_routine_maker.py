@@ -510,10 +510,20 @@ class RoutineMakerTests(unittest.TestCase):
         unknown = plan()
         unknown["days"][0]["exercises"][0]["exercise_id"] = 999
         self.client.generate.reset_mock()
-        result = self.turn(
-            decision(parameters=COMPLETE), '{"name":',
-            json.dumps(unknown), json.dumps(plan()),
+        with self.assertLogs("utils.routinemaker.func.handle", level="WARNING") as captured:
+            result = self.turn(
+                decision(parameters=COMPLETE), '{"name":',
+                json.dumps(unknown), json.dumps(plan()), query="private-query",
+            )
+        self.assertEqual(
+            [record.getMessage() for record in captured.records],
+            [
+                "Routine plan rejected stage=routine_maker attempt=1 max_attempts=3",
+                "Routine plan rejected stage=routine_maker attempt=2 max_attempts=3",
+            ],
         )
+        self.assertNotIn("private-query", "\n".join(captured.output))
+        self.assertNotIn(plan()["name"], "\n".join(captured.output))
         self.assertEqual(result.status, "awaiting_confirmation")
         self.assertEqual(result.routine.summary, plan()["summary"])
         calls = self.client.generate.call_args_list

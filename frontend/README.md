@@ -22,6 +22,54 @@ A responsive React + Vite mockup for OrchestratorApp, with two views:
   Loading, errors, retry, and
   profiles without an active routine have explicit states.
 
+### Source documentation
+
+JavaScript and JSX modules begin with `@file` JSDoc describing their UI or
+infrastructure role. Components and hooks document their props/options, state
+dependencies, and return values; shared data contracts use JSDoc typedefs beside
+their validators and adapters rather than introducing runtime interfaces.
+Numbered comments explain lifecycle, cancellation, mutation, and recovery flows.
+Keep these contracts aligned with implementation when changing behavior, especially
+NDJSON event handling, routine draft confirmation, and actual-set persistence.
+CSS owns visual transitions except for the explicitly documented gallery and
+workflow playback timers; neither timer controls backend execution.
+
+### Frontend observability
+
+The shared logger in `src/lib/observability/logger.js` writes structured browser
+console records with UTC timestamps, severity, scope, and stable event names.
+Set `VITE_LOG_LEVEL=debug|info|warn|error|off` before starting Vite or building.
+The default is `debug` in development and `warn` in production; invalid values
+fail explicitly. `configureLogging(level)` can change the threshold at runtime.
+
+Use `createLogger('module')` with static event names and metadata. Only `method`,
+`route`, `status`, `duration_ms`, `outcome`, and `error_type` are retained.
+Route labels must be static templates, never actual URLs. Never put private data
+in scopes, event names, or metadata values. Use `errorType(error)` rather than
+logging error objects, messages, stacks, or rejection reasons.
+
+All application API requests use `observedFetch(routeTemplate, url, options)`.
+It preserves fetch responses/errors and records timing until response headers,
+HTTP status, and network failures. HTTP 4xx logs at `warn`, 5xx/network failures
+at `error`, intentional cancellation at `debug`, and timeouts at `warn`.
+Chat also times response decoding, including NDJSON stream consumption, and
+records stream/parse failures through `observeOperation`. It does not consume
+responses twice or delay streaming callbacks.
+
+Startup registers uncaught-error and unhandled-rejection listeners once, with
+cleanup on Vite hot disposal. A React error boundary wraps both the theme
+provider and application, logs render/lifecycle failures, and shows a localized
+reload screen. Reloading can lose unsaved changes. Existing handled-error UI
+and retry behavior are preserved.
+
+No logs are persisted or sent to a backend or third-party service. The module
+does not record request/response bodies, headers, user/session identifiers,
+query strings, raw error messages, or stacks. Browser/React developer diagnostics
+remain independent of this module.
+
+Run `npm run test:observability` for logging, timing, cancellation, privacy,
+listener lifecycle, and React error-boundary tests.
+
 ### Live system map
 
 Use **Live system map** in the header to open a separate, resizable browser window.

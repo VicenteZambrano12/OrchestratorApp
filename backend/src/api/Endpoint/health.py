@@ -1,3 +1,9 @@
+"""Expose public application liveness independently of chat dependencies.
+
+This router returns a fixed validated payload; it does not instantiate agents,
+load system prompts, call Gemini, or probe persistence.
+"""
+
 from fastapi import APIRouter, status
 
 from api.DataClasses.HealthResponse import HealthResponse
@@ -24,5 +30,12 @@ async def health_check() -> dict[str, str]:
 
     **Side effects:** none; no pipeline execution or external API usage.
     **Permissions:** public; no authentication or authorization is required.
+
+    No request body or query parameters are accepted by this handler.
+
+    Returns:
+        dict[str, str]: HTTP 200 with ``{"status": "ok"}``, validated against
+        HealthResponse. Unhandled server failures use HTTP 500.
     """
+    # 1. Report process responsiveness without coupling liveness to providers.
     return {"status": "ok"}

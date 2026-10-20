@@ -1,13 +1,38 @@
-"""Load app documentation and describe FastAPI's existing error handling."""
+"""Load validated FastAPI metadata and reusable OpenAPI error descriptions.
+
+Application startup reads the YAML file adjacent to this module. Endpoints reuse
+the response dictionaries to describe existing validation and unhandled failures;
+these declarations do not install exception handlers or change runtime status
+codes. Chat provider failures are documented, not recovered from here.
+"""
 
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from obervability.logger import Logger
+
+
+logger = Logger.get_logger(__name__)
+
 
 class AppDocumentation(BaseModel):
-    """Validated, documentation-only keyword arguments for the FastAPI app."""
+    """Validate documentation keyword arguments consumed by application setup.
+
+    Strict field validation prevents unintended application options from entering
+    through the metadata file; unknown keys are rejected.
+
+    Attributes:
+        title (str): Display name of the API.
+        summary (str): Short application description.
+        version (str): Published API version string.
+        description (str): Extended API documentation.
+        contact (dict[str, str]): Contact metadata passed to FastAPI.
+        license_info (dict[str, str]): License metadata passed to FastAPI.
+        openapi_tags (list[dict[str, str]]): Ordered tag metadata for endpoint
+            organization in generated documentation.
+    """
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -20,9 +45,23 @@ class AppDocumentation(BaseModel):
     openapi_tags: list[dict[str, str]]
 
 
+@Logger.trace(logger)
 def load_app_documentation() -> AppDocumentation:
-    """Load metadata relative to this module; configuration errors propagate."""
+    """Read and validate application metadata from the adjacent YAML file.
+
+    Returns:
+        AppDocumentation: Strictly validated FastAPI documentation arguments.
+
+    Raises:
+        OSError: If the metadata file cannot be read.
+        UnicodeError: If its contents cannot be decoded as UTF-8.
+        yaml.YAMLError: If the document is not valid YAML.
+        pydantic.ValidationError: If metadata has missing, extra, or invalid
+            fields. Startup callers receive these errors without fallback.
+    """
+    # 1. Resolve metadata beside the module, independent of the working directory.
     path = Path(__file__).with_suffix(".yaml")
+    # 2. Validate before exposing configuration to FastAPI application setup.
     return AppDocumentation.model_validate(
         yaml.safe_load(path.read_text(encoding="utf-8"))
     )

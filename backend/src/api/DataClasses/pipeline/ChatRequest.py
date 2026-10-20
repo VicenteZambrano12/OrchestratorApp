@@ -1,10 +1,29 @@
+"""Validate caller input before chat routing or streaming begins.
+
+The API forwards the original query and requested language to the pipeline.
+Subsystems own prompt construction, catalog/database tools, and generated
+answers; this body neither accepts explicit history nor configures tools.
+"""
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatRequest(BaseModel):
-    """A gym-assistance question with response language and optional routine owner."""
+    """Describe a gym question and the optional context for user-scoped systems.
+
+    Strict validation rejects unknown fields and coercion. Past-routine analysis
+    and Routine Maker require an existing user downstream; exercise explanations
+    can run without one. The session identifier comes from the endpoint path.
+
+    Attributes:
+        query (str): Nonblank question; original surrounding whitespace remains.
+        language (Literal["ES", "EN"]): Case-sensitive response-language code.
+        user_id (int | None): Positive database user ID or None; not a credential.
+        client_saves_routine (bool): Whether routine confirmation should return
+            ``save_requested`` for a client PUT instead of persisting directly.
+    """
 
     model_config = ConfigDict(
         extra="forbid",
@@ -46,6 +65,18 @@ class ChatRequest(BaseModel):
     @field_validator("query")
     @classmethod
     def validate_query(cls, value: str) -> str:
+        """Reject whitespace-only questions without normalizing valid input.
+
+        Args:
+            value (str): Query after Pydantic's string and length checks.
+
+        Returns:
+            str: The original query, including surrounding whitespace.
+
+        Raises:
+            ValueError: If the query contains no non-whitespace characters.
+        """
+        # 1. Validate usability without changing the text sent to the agents.
         if not value.strip():
             raise ValueError("query must be a non-empty string")
         return value

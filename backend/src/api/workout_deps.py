@@ -1,3 +1,10 @@
+"""Persist completed workout sets and derive the seven-day UTC activity view.
+
+Endpoints delegate user/routine/catalog checks to this repository. A workout is
+one transaction with a generated training ID; rows with no training ID are
+templates and are deliberately excluded from activity reporting.
+"""
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -5,17 +12,55 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from api.DataClasses.Workout import WorkoutDay, WorkoutRequest, WorkoutResponse
+from obervability.logger import Logger
 from sql.SQLClient import SQLClient
 
 
+logger = Logger.get_logger(__name__)
+
+
 class WorkoutRepository:
+    """Coordinate workout ownership checks and transaction-scoped SQL writes.
+
+    API schemas validate individual measurements before repository calls.
+    SQLClient selects the runtime backend unless a path override is supplied.
+
+    Attributes:
+        path (Path | None): Optional database override forwarded to SQLClient.
+    """
+
     def __init__(self, path: Path | None = None):
+        """Retain the database override without accessing persistence.
+
+        Args:
+            path (Path | None): Explicit database path or runtime selection.
+
+        Returns:
+            None: Retains database selection without opening a SQL connection.
+        """
+        # 1. Defer SQL access until a calendar read or atomic workout write.
         self.path = path
 
+    @Logger.trace(logger)
     def days(self, user_id: int) -> list[WorkoutDay]:
+        """Build the user's activity calendar for today and six preceding days.
+
+        Args:
+            user_id (int): Database profile identifier to query.
+
+        Returns:
+            list[WorkoutDay]: Seven UTC dates oldest first, with English weekday
+            names and flags based only on rows with non-null training IDs.
+
+        Raises:
+            HTTPException: With status 404 if the user does not exist.
+            Exception: SQLClient configuration and database errors propagate.
+        """
+        # 1. Bound activity by UTC dates so the API and stored session dates agree.
         today = datetime.now(timezone.utc).date()
         start = today - timedelta(days=6)
         end = today + timedelta(days=1)
+        # 2. Distinguish missing users from valid users with no logged workouts.
         with SQLClient(database_path=self.path) as db:
             if db.fetch_one("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)) is None:
                 raise HTTPException(status_code=404, detail="The user does not exist.")
@@ -27,8 +72,10 @@ class WorkoutRepository:
                     (user_id, start.isoformat(), end.isoformat()),
                 )
             }
+        # 3. Fill inactive dates to keep the client calendar stable and ordered.
         weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
         dates = [start + timedelta(days=offset) for offset in range(7)]
+        logger.debug("Workout calendar loaded")
         return [
             WorkoutDay(
                 date=day, day_of_week=weekdays[day.weekday()],
@@ -37,7 +84,28 @@ class WorkoutRepository:
             for day in dates
         ]
 
+    @Logger.trace(logger)
     def save(self, user_id: int, workout: WorkoutRequest) -> WorkoutResponse:
+        """Atomically record a new session after ownership and catalog checks.
+
+        Exercises need not belong to the routine's prescribed exercise list;
+        this operation checks catalog existence and routine ownership only.
+        Repeated calls create distinct training sessions.
+
+        Args:
+            user_id (int): Owner of the completed workout and selected routine.
+            workout (WorkoutRequest): Validated routine ID and ordered set data.
+
+        Returns:
+            WorkoutResponse: Committed session identifiers, UTC timing, and count.
+
+        Raises:
+            HTTPException: With status 404 for an absent user or 422 for an
+                unowned routine or unknown exercise IDs.
+            Exception: SQLClient failures propagate; the context manager handles
+                transaction completion or rollback.
+        """
+        # 1. Validate ownership and catalog references within the write transaction.
         with SQLClient(database_path=self.path) as db:
             db.begin_write()
             if db.fetch_one("SELECT 1 FROM dim_users WHERE id = ?", (user_id,)) is None:
@@ -58,11 +126,13 @@ class WorkoutRepository:
             if exercise_ids != known_ids:
                 raise HTTPException(status_code=422, detail="Workout contains unknown exercise IDs.")
 
+            # 2. Share server timing and session identity across all submitted sets.
             training_id = str(uuid4())
             created_at = datetime.now(timezone.utc).replace(microsecond=0)
             exercise_order: dict[int, int] = {}
             set_numbers: dict[int, int] = {}
             rows = []
+            # 3. Preserve submitted exercise order and number each exercise's sets.
             for item in workout.sets:
                 exercise_order.setdefault(item.exercise_id, len(exercise_order) + 1)
                 set_numbers[item.exercise_id] = set_numbers.get(item.exercise_id, 0) + 1
@@ -72,6 +142,7 @@ class WorkoutRepository:
                     item.reps, item.weight, item.duration_seconds, item.distance_meters,
                     item.rpe, created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 ))
+            # 4. Insert the complete session together; never mutate routine state.
             db.executemany(
                 "INSERT INTO fact_workout_sets "
                 "(user_id, routine_id, exercise_id, training_id, exercise_order, set_number, "
@@ -79,6 +150,7 @@ class WorkoutRepository:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
+        logger.info("Workout saved")
         return WorkoutResponse(
             training_id=training_id, user_id=user_id, routine_id=workout.routine_id,
             date=created_at.date(), created_at=created_at, sets_saved=len(rows),
@@ -86,4 +158,10 @@ class WorkoutRepository:
 
 
 def get_workout_repository() -> WorkoutRepository:
+    """Construct the workout persistence dependency without opening SQL.
+
+    Returns:
+        WorkoutRepository: Repository using runtime-selected database settings.
+    """
+    # 1. Inject workout persistence while leaving connections scoped to operations.
     return WorkoutRepository()

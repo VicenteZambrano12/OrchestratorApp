@@ -1,3 +1,10 @@
+"""Validate top-level routing context and constrain model output before dispatch.
+
+Requests may carry their own subsystem descriptions or use the configured JSON
+file. Valid memory is forwarded only when present. Up to three selections are
+checked against exact allowed IDs; provider failures are not treated as bad IDs.
+"""
+
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -5,7 +12,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from obervability.logger import Logger
 from utils.orch.dataclass.models import MemoryTurn, _RoutingSelection
+
+
+logger = Logger.get_logger(__name__)
 
 
 def route(
@@ -14,7 +25,26 @@ def route(
 	payload: str | Mapping[str, Any],
 	language: str | None = None,
 ) -> str:
-	"""Validate a routing request and select an ID with up to three attempts."""
+	"""Select a configured target or ``no_system`` without invoking that target.
+
+    Args:
+        selector (Callable): Model adapter taking query, target list, language,
+            and a fourth memory argument only when memory is nonempty.
+        systems_path (Path): JSON configuration used when subsystems are omitted.
+        payload (str | Mapping[str, Any]): JSON object or mapping with ``query``,
+            optional ``language``, ``memory``, and ``subsystems``.
+        language (str | None): Explicit language override; otherwise payload or EN.
+
+    Returns:
+        str: An exact configured ID or the reserved ``no_system`` fallback ID.
+
+    Raises:
+        ValueError: Request/configuration is invalid or three selections fail.
+        ValidationError: A prior turn violates the memory schema.
+        OSError: The configured systems file cannot be read.
+        Exception: Selector/provider failures propagate immediately.
+    """
+	# 1. Normalize input and language before spending a routing invocation.
 	if isinstance(payload, str):
 		payload = json.loads(payload)
 	if not isinstance(payload, Mapping):
@@ -28,11 +58,13 @@ def route(
 	if not isinstance(language, str) or language not in ("ES", "EN"):
 		raise ValueError("language must be ES (Spanish) or EN (English)")
 
+	# 2. Validate remembered turns before exposing them as model context.
 	memory = [
 		MemoryTurn.model_validate(turn).model_dump(exclude_unset=True)
 		for turn in payload.get("memory") or []
 	]
 
+	# 3. Use inline targets when provided; otherwise load the deployment's catalog.
 	if "subsystems" in payload:
 		subsystems = payload["subsystems"]
 	else:
@@ -43,6 +75,7 @@ def route(
 	if not isinstance(subsystems, list) or not subsystems:
 		raise ValueError("subsystems must be a non-empty list")
 
+	# 4. Require unambiguous target identities before constructing the allowlist.
 	targets: dict[str, dict[str, Any]] = {}
 	for subsystem in subsystems:
 		if not isinstance(subsystem, Mapping):
@@ -59,9 +92,10 @@ def route(
 			raise ValueError(f"duplicate subsystem id: {subsystem_id}")
 		targets[subsystem_id] = dict(subsystem)
 
+	# 5. Retry malformed selections only; never invent a target after exhaustion.
 	allowed_ids = set(targets) | {"no_system"}
 	last_error: ValidationError | None = None
-	for _ in range(3):
+	for attempt in range(3):
 		arguments = (query, [dict(target) for target in targets.values()], language)
 		selected_id = selector(*arguments, memory) if memory else selector(*arguments)
 		try:
@@ -70,7 +104,9 @@ def route(
 			)
 		except ValidationError as error:
 			last_error = error
+			logger.warning("Subsystem selection rejected attempt=%d max_attempts=3", attempt + 1)
 		else:
+			logger.info("Subsystem selected subsystem=%s", selection.selected_id)
 			return selection.selected_id
 	raise ValueError(
 		"selector failed to return exactly one allowed routing id "

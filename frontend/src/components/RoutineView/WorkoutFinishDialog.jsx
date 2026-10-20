@@ -1,7 +1,20 @@
+/**
+ * @file Performed-workout save confirmation and API payload normalization.
+ * Validates filled sets from completed exercises and keeps the workout active when
+ * saving fails; planned targets are not used as substitutes for actual repetitions.
+ */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { workoutSetsError } from '../../features/RoutineView/workout-session/workoutSets'
 
+/**
+ * Confirms actual-set persistence with native modal focus and duplicate-write guards.
+ * @param {object} props - Dialog properties.
+ * @param {import('../../features/RoutineView/workout-session/workoutSets').WorkoutSet[]} props.sets - Filled, completed-exercise sets.
+ * @param {(sets: Array<{exercise_id: number, reps: number, weight: number|null}>) => Promise<void>} props.onConfirm - Persists and ends session on success.
+ * @param {() => void} props.onClose - Resumes the active workout.
+ * @returns {import('react').ReactElement} Save confirmation with validation/API alerts.
+ */
 export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
   const { t } = useTranslation()
   const dialogRef = useRef(null)
@@ -10,12 +23,19 @@ export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    // 1. Open a native modal once and release it on unmount.
     const dialog = dialogRef.current
     dialog.showModal()
     return () => dialog.close()
   }, [])
 
+  /**
+   * Validates actual sets, normalizes numbers, and awaits parent-owned persistence.
+   * @param {import('react').SubmitEvent<HTMLFormElement>} event - Form submission.
+   * @returns {Promise<void>} Settles with visible validation/save feedback.
+   */
   async function confirm(event) {
+    // 1. Reject duplicate submissions and validate before acquiring the save lock.
     event.preventDefault()
     if (inFlight.current) return
     setError('')
@@ -24,6 +44,7 @@ export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
       setError(t(validation))
       return
     }
+    // 2. Serialize actual numbers; blank load remains unknown (null), not zero.
     inFlight.current = true
     setSaving(true)
     try {
@@ -31,8 +52,10 @@ export default function WorkoutFinishDialog({ sets, onConfirm, onClose }) {
         exercise_id: set.exercise_id, reps: Number(set.reps), weight: set.weight.trim() === '' ? null : Number(set.weight),
       })))
     } catch (saveError) {
+      // 3. Preserve parent session/input state and show the backend failure for retry.
       setError(t('Could not save workout: {{message}}', { message: t(saveError.message) }))
     } finally {
+      // 4. Release pending state regardless of persistence outcome.
       inFlight.current = false
       setSaving(false)
     }

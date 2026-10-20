@@ -1,3 +1,9 @@
+/**
+ * @file Browser-style regression tests for routine versioning and workout persistence.
+ * A happy-dom React root and Vite-loaded modules exercise real UI flows against
+ * mocked fetch receipts. Setup restores browser globals and unmounts roots so
+ * session timers, dialogs, and pending requests cannot leak between tests.
+ */
 import assert from 'node:assert/strict'
 import { after, afterEach, before, beforeEach, test } from 'node:test'
 import { act, createElement } from 'react'
@@ -67,21 +73,47 @@ after(async () => {
   }
 })
 
+/**
+ * Resolves a required button by its visible label within a DOM scope.
+ * @param {string} text - Exact trimmed button text.
+ * @param {Document|Element} [scope=document] - Search boundary.
+ * @returns {HTMLButtonElement} Matching button; assertion fails if absent.
+ */
 function button(text, scope = document) {
   const found = [...scope.querySelectorAll('button')].find((element) => element.textContent.trim() === text)
   assert.ok(found, `Missing button: ${text}`)
   return found
 }
 
+/**
+ * Activates a labeled button inside React's state-flushing boundary.
+ * @param {string} text - Button text.
+ * @param {Document|Element} [scope] - Optional search boundary.
+ * @returns {Promise<void>} Resolves after resulting React work settles.
+ */
 async function click(text, scope) {
   await act(async () => button(text, scope).click())
 }
 
+/**
+ * Creates a saved-routine response with the identity header required by the view.
+ * @param {object|null} routine - Fixture payload.
+ * @param {number} [id=42] - Persisted routine version identity.
+ * @returns {Response} JSON fixture response.
+ */
 function routineResponse(routine, id = 42) {
   return Response.json(routine, { headers: { 'X-Routine-Id': String(id) } })
 }
 
+/**
+ * Simulates native input editing while bypassing React's tracked value setter.
+ * @param {string} label - Exact aria-label.
+ * @param {string} value - New input text.
+ * @param {Document|Element} [scope=document] - Search boundary.
+ * @returns {Promise<void>} Resolves after input-driven state updates.
+ */
 async function changeInput(label, value, scope = document) {
+  // 1. Write through the native setter so React observes a genuine input change.
   await act(async () => {
     const input = scope.querySelector(`input[aria-label="${label}"]`)
     assert.ok(input, `Missing input: ${label}`)
@@ -90,6 +122,11 @@ async function changeInput(label, value, scope = document) {
   })
 }
 
+/**
+ * Edits the fixture bench-press target count through a native input event.
+ * @param {string} value - New sets draft.
+ * @returns {Promise<void>} Resolves after editor validation rerenders.
+ */
 async function changeSets(value) {
   await act(async () => {
     const input = document.querySelector('input[aria-label="Bench Press sets"]')
@@ -258,6 +295,10 @@ test('suggested additions retain catalog IDs and custom swaps cannot save under 
   assert.equal(document.querySelector('input[aria-label="Custom press sets"]').value, '3')
 })
 
+  /**
+   * Creates independent days for session-lock and day-selection assertions.
+   * @returns {object} Cloned two-day plan fixture.
+   */
   function twoDayPlan() {
     const source = structuredClone(plan)
     source.days.push({
@@ -267,10 +308,20 @@ test('suggested additions retain catalog IDs and custom swaps cannot save under 
     return source
   }
 
+  /**
+   * Marks an exercise complete through its accessible control.
+   * @param {string} name - Exercise name in the current day.
+   * @returns {Promise<void>} Resolves after completion/rest state updates.
+   */
   async function markDone(name) {
     await act(async () => document.querySelector(`[aria-label="Mark ${name} complete"]`).click())
   }
 
+  /**
+   * Enters distinct actual results to distinguish performed sets from targets.
+   * @param {Document|Element} [scope=document] - Input search boundary.
+   * @returns {Promise<void>} Resolves after all three sets are entered.
+   */
   async function fillBenchSets(scope = document) {
     for (let number = 1; number <= 3; number += 1) {
       await changeInput(`Bench Press set ${number} reps`, String(11 - number), scope)
@@ -278,6 +329,12 @@ test('suggested additions retain catalog IDs and custom swaps cannot save under 
     }
   }
 
+  /**
+   * Builds a receipt matching the submitted routine identity and actual-set count.
+   * @param {{routine_id: number, sets: object[]}} payload - Submitted workout.
+   * @param {string} [trainingId='workout-session-id'] - Synthetic training identity.
+   * @returns {Response} Successful persistence acknowledgement.
+   */
   function workoutResponse(payload, trainingId = 'workout-session-id') {
     return Response.json({
       training_id: trainingId, user_id: 7, routine_id: payload.routine_id,
