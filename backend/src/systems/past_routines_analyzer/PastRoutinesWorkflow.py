@@ -1,8 +1,15 @@
-"""Past routines flow: Gemini routing -> SQL retrieval -> Gemini explanation."""
+"""Coordinate Gemini routing, parameterized SQL retrieval, and history explanation.
+
+The nested router uses conversation context to select a static SQL template and
+optional day filter. The workflow reads only the requested user's records, then
+asks Gemini for prose under a separate YAML system instruction. Returned data
+remains the exact SQL rows rather than a model-generated reconstruction.
+"""
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from obervability.logger import Logger
 from sql.SQLClient import SQLClient
 from systems.past_routines_analyzer.PastRoutinesAnalyzerOrchestrator import (
     PastRoutinesAnalyzerOrchestrator,
@@ -17,6 +24,9 @@ from utils.past_routines_analyzer.func.load_explainer_prompt import (
 )
 
 
+logger = Logger.get_logger(__name__)
+
+
 class PastRoutinesWorkflow:
     """Answer a workout history request from the user's logged workouts.
 
@@ -24,6 +34,13 @@ class PastRoutinesWorkflow:
     2. The route's SQL template is run with SQLClient for the given user.
     3. Gemini explains the rows. ``data`` keeps the exact database rows; only
        ``llm_explain`` is generated.
+
+    Attributes:
+        _prompt (str): Validated YAML explanation system instruction.
+        _client (GeminiClient): Reused explanation client, shared with the default
+            nested router when no router is injected.
+        _orchestrator (PastRoutinesAnalyzerOrchestrator): Context-aware route chooser.
+        _sql_client_factory (Callable[[], SQLClient]): Creates managed SQL connections.
     """
 
     def __init__(
@@ -34,6 +51,26 @@ class PastRoutinesWorkflow:
         sql_client_factory: Callable[[], SQLClient] = SQLClient,
         prompt_path: str | Path | None = None,
     ) -> None:
+        """Configure reusable routing/explanation dependencies and SQL connection factory.
+
+        Args:
+            client (GeminiClient | None): Existing client or a 4096-token default.
+            orchestrator (PastRoutinesAnalyzerOrchestrator | None): Injected router,
+                or create one sharing this workflow's client.
+            sql_client_factory (Callable[[], SQLClient]): Fresh SQL connection factory.
+            prompt_path (str | Path | None): Override explanation YAML only; the
+                default nested router loads its own routing configuration.
+
+        Returns:
+            None: Initializes explanation, routing, and SQL-factory dependencies.
+
+        Raises:
+            TypeError: SQL connection factory is not callable.
+            ValueError: Prompt contents or default Gemini configuration are invalid.
+            OSError: Required prompt configuration cannot be read.
+            yaml.YAMLError: Required prompt configuration cannot be parsed.
+        """
+        # 1. Check the factory before loading instructions or allocating clients.
         if not callable(sql_client_factory):
             raise TypeError("sql_client_factory must be callable")
         self._prompt = load_explainer_prompt(prompt_path)
@@ -47,6 +84,7 @@ class PastRoutinesWorkflow:
         )
         self._sql_client_factory = sql_client_factory
 
+    @Logger.trace(logger)
     def handle(
         self,
         query: str,
@@ -55,13 +93,28 @@ class PastRoutinesWorkflow:
         language: str = "EN",
         memory: list[Mapping[str, object]] | None = None,
     ) -> PastRoutinesAnalysis:
-        """Return the route, day_type, database rows and their explanation.
+        """Route a user-scoped history question and explain its exact retrieved rows.
 
-        Invalid input raises ValueError before any API or database call.
-        Routing, database and provider errors propagate.
+        Args:
+            query (str): Nonblank history question, validated by the nested router.
+            user_id (int): Positive account ID; booleans are rejected before I/O.
+            language (str): ``EN`` or ``ES`` for routing and explanation.
+            memory (list[Mapping[str, object]] | None): Prior turns for routing
+                references and explanation context.
+
+        Returns:
+            PastRoutinesAnalysis: Validated route/filter, raw rows, and generated
+            narrative, including an explanation when retrieval returns no rows.
+
+        Raises:
+            ValueError: Input, routing decisions, template, or explanation is invalid.
+            pydantic.ValidationError: Memory or final result violates its schema.
+            Exception: Configuration, routing, SQL, and provider errors propagate.
         """
+        # 1. Reject invalid identity before routing can spend a provider call.
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
             raise ValueError("user_id must be a positive integer")
+        # 2. Resolve follow-ups into a supported retrieval route and optional day type.
         decision = self._orchestrator.route(query, language=language, memory=memory)
         route_labels = {
             "past_day_exercise": "Loading your last training day",
@@ -70,11 +123,16 @@ class PastRoutinesWorkflow:
         }
         report_progress(decision.route, route_labels[decision.route])
         report_progress("history_search", "Searching your logged workout data")
+        # 3. Run only the selected static template with bound user/filter values.
         data = fetch_history(self._sql_client_factory, decision, user_id)
+        logger.debug("Workout history retrieved row_count=%d", len(data))
         report_progress("history_explanation", "Summarizing your training results")
+        # 4. Generate narrative from the rows while preserving the raw data separately.
         explanation = explain_history(
             self._client, self._prompt, query, language, decision, data, memory
         )
+        logger.info("Workout history analysis completed route=%s", decision.route)
+        # 5. Validate the public envelope instead of trusting provider output shape.
         return PastRoutinesAnalysis(
             route=decision.route,
             day_type=decision.day_type,

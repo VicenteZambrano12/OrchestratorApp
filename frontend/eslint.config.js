@@ -1,3 +1,8 @@
+/**
+ * @file Flat ESLint configuration for frontend JavaScript and JSX modules.
+ * Enforces JavaScript correctness, React Hooks lifecycle rules, and Vite refresh
+ * constraints using browser globals; generated production output is excluded.
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
@@ -5,7 +10,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'test-results', 'playwright-report']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

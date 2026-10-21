@@ -7,11 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:startup": "playwright test tests/startup.spec.js",
+    "test:ui": "playwright test",
     "test:i18n": "node --test src/i18n/i18n.test.js",
     "test:routine-update": "node --test src/components/RoutineView/workout-update.test.js",
+    "test:observability": "node --test src/lib/observability/observability.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "framer-motion": "^12.0.0",
     "i18next": "^25.6.0",
     "lucide-react": "^1.57.0",
     "react": "^19.2.8",
@@ -21,6 +25,7 @@
     "uuid": "^14.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@babel/core": "^7.29.7",
     "@eslint/js": "^10.0.1",
     "@rolldown/plugin-babel": "^0.2.3",

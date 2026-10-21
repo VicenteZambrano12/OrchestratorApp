@@ -1,9 +1,20 @@
+/**
+ * @file Weekly training-report view combining measured volume, muscle balance,
+ * and best-lift summaries. Radar series normalize sets and volume independently;
+ * those visual ratios describe distribution, not comparable absolute units.
+ */
 import { BarChart3, CalendarDays, Dumbbell, Layers, Medal, Radar, Target, Trophy } from 'lucide-react'
 import { MUSCLE_COLORS, bestExercises, dailyVolume, formatDate, muscleLabel, summarize, weeklyMuscles, weightUnit } from '../../features/PastRoutinesReport/report-data/reportData'
 import { useReportFormat } from '../../features/PastRoutinesReport/report-data/useReportFormat'
 import { KpiStrip, MuscleChip, ReportSection } from './ReportParts'
 import RadarChart from './RadarChart'
 
+/**
+ * Derives weekly visualization data from the history agent's provided result rows.
+ * @param {object} props - Weekly report properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').ReportRow[]} props.rows - Weekly performed sets.
+ * @returns {import('react').ReactElement} KPIs, radar, rankings, and daily-volume chart.
+ */
 export default function WeeklyView({ rows }) {
   const { t, language, number, weight } = useReportFormat()
   const unit = weightUnit(rows)

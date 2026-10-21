@@ -1,3 +1,8 @@
+/**
+ * @file User-scoped training sidebar loading saved-plan and weekly-activity summaries.
+ * Independent requests/retries isolate routine availability from workout history;
+ * neither data source is substituted with demo activity when the backend fails.
+ */
 import { ArrowRight, Dumbbell, Sparkles, Target } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -6,17 +11,29 @@ import { getWeeklyProgress } from '../../features/TrainingPanel/weekly-progress/
 import { getUserDays, getUserRoutine } from '../../hooks/session/users'
 import { getPlannedSessionMinutes } from '../../features/RoutineMaker/routine-data/routineData'
 
+/**
+ * Renders planned frequency/timing and a validated seven-day workout rhythm.
+ * @param {object} props - Training sidebar properties.
+ * @param {number} props.userId - Current persisted profile ID.
+ * @param {unknown} [props.routineRevision] - Dependency token triggering a saved-plan refresh.
+ * @param {() => void} props.onOpen - Opens the routine workspace.
+ * @param {(prompt: string) => void} props.onPrompt - Seeds a reviewable chat prompt.
+ * @returns {import('react').ReactElement} Sidebar with independent loading/error/retry states.
+ */
 export default function TrainingPanel({ userId, routineRevision, onOpen, onPrompt }) {
   const { t } = useTranslation()
   const [progress, setProgress] = useState(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+  // Undefined means not loaded; null is a successful response with no saved plan.
   const [routine, setRoutine] = useState(undefined)
   const [routineError, setRoutineError] = useState('')
   const [routineAttempt, setRoutineAttempt] = useState(0)
 
   useEffect(() => {
+    // 1. Start a cancellable read whenever user, saved-plan revision, or retry changes.
     const controller = new AbortController()
+    // 2. Publish plan/error only for the active request; never invent a fallback plan.
     getUserRoutine(userId, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) {
@@ -27,6 +44,7 @@ export default function TrainingPanel({ userId, routineRevision, onOpen, onPromp
       .catch((requestError) => {
         if (!controller.signal.aborted) setRoutineError(requestError.message)
       })
+    // 3. Cancel stale reads before a new revision or profile can render their results.
     return () => controller.abort()
   }, [userId, routineRevision, routineAttempt])
 
@@ -35,8 +53,10 @@ export default function TrainingPanel({ userId, routineRevision, onOpen, onPromp
     ? Math.max(...routine.days.map(getPlannedSessionMinutes)) : null
 
   useEffect(() => {
+    // 1. Load history independently so routine failures do not hide weekly activity.
     const controller = new AbortController()
     getUserDays(userId, controller.signal)
+      // 2. Validate calendar continuity before interpreting backend workout flags.
       .then(getWeeklyProgress)
       .then((result) => {
         if (!controller.signal.aborted) setProgress(result)
@@ -44,10 +64,13 @@ export default function TrainingPanel({ userId, routineRevision, onOpen, onPromp
       .catch((requestError) => {
         if (!controller.signal.aborted) setError(requestError.message)
       })
+    // 3. Cancel this generation when user identity or explicit retry changes.
     return () => controller.abort()
   }, [userId, attempt])
 
+  /** @returns {void} Clears failed weekly data and schedules a fresh backend read. */
   function retry() {
+    // 1. Re-enter loading rather than displaying stale activity as current.
     setError('')
     setProgress(null)
     setAttempt((value) => value + 1)
@@ -62,7 +85,12 @@ export default function TrainingPanel({ userId, routineRevision, onOpen, onPromp
       <div className="barbell-art" aria-hidden="true">
         <svg viewBox="0 0 280 130" fill="none"><ellipse cx="140" cy="108" rx="98" ry="10" fill="#d6ded2" /><g transform="rotate(-17 140 65)"><rect x="27" y="61" width="226" height="12" rx="6" fill="#94a38b" /><rect x="50" y="30" width="23" height="74" rx="7" fill="#344c3b" /><rect x="73" y="39" width="15" height="56" rx="5" fill="#57745b" /><rect x="207" y="30" width="23" height="74" rx="7" fill="#344c3b" /><rect x="192" y="39" width="15" height="56" rx="5" fill="#57745b" /><path d="M57 38v58M214 38v58" stroke="#6f896f" strokeWidth="2" strokeLinecap="round" /></g><path d="m246 22 3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#8eaa70" /><circle cx="37" cy="30" r="3" fill="#a9bc91" /></svg>
       </div>
-      {routineError ? <div role="alert"><p>{t('Could not load routine: {{message}}', { message: routineError })}</p><button type="button" className="retry-button" onClick={() => { setRoutineError(''); setRoutine(undefined); setRoutineAttempt((value) => value + 1) }}>{t('Retry')}</button></div> :
+      {routineError ? <div role="alert"><p>{t('Could not load routine: {{message}}', { message: routineError })}</p><button type="button" className="retry-button" onClick={() => {
+        // 1. Clear failed plan data and re-enter the distinct routine loading state.
+        setRoutineError(''); setRoutine(undefined)
+        // 2. Refresh only the routine request, leaving weekly activity untouched.
+        setRoutineAttempt((value) => value + 1)
+      }}>{t('Retry')}</button></div> :
         routine === undefined ? <p role="status">{t('Loading your routine…')}</p> :
           routine === null ? <p>{t('No saved routine yet')}</p> :
             <div className="training-stats"><div><strong>{routine.days.length} <span>{t('days')}</span></strong><small>{t('Weekly frequency')}</small></div><div title={estimatedDuration ? t('Estimated from planned sets: 5 min warm-up, 45 sec per set, 90 sec rest between sets, and 1 min between exercises. Recorded workouts are not used.') : undefined}><strong>{sessionMinutes} <span>{t('min')}</span></strong><small>{t(estimatedDuration ? 'Estimated max session' : 'Max session duration')}</small></div></div>}

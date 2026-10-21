@@ -1,3 +1,7 @@
+/**
+ * @file Shared dark-palette design tokens and CSS custom-property naming utility.
+ * Token names are converted consistently for consumers generating inline styles.
+ */
 export const colors = {
   bg: '#0d0f0e',
   bgRaised: '#121514',
@@ -25,4 +29,9 @@ export const colors = {
   dangerBorder: 'rgb(239 68 68 / 0.3)',
 }
 
+/**
+ * Converts camel-case token names and numeric suffixes to namespaced CSS variables.
+ * @param {string} key - Palette token key, such as emerald400.
+ * @returns {string} CSS custom-property name, such as --c-emerald-400.
+ */
 export const toCssVarName = (key) => `--c-${key.replace(/[A-Z0-9]+/g, (m) => `-${m.toLowerCase()}`)}`

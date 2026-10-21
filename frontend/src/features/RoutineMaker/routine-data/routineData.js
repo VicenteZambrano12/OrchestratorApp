@@ -1,11 +1,75 @@
+/**
+ * @file Routine validation and adapters between backend plans and editable UI state.
+ * New plans require complete timing and unique catalog exercises per day. Legacy
+ * plans remain readable and loggable but cannot be converted back for editing.
+ *
+ * @typedef {object} PlanExercise
+ * @property {number} exercise_id - Positive catalog identifier.
+ * @property {string} name - Catalog display name.
+ * @property {number} sets - Integer target from 1 to 20.
+ * @property {string} reps - Nonempty repetition target.
+ * @property {number|null} rest_seconds - Rest duration; null for legacy templates.
+ * @property {string} notes - Exercise-specific instructions.
+ *
+ * @typedef {object} PlanDay
+ * @property {number} day - One-based sequential day number.
+ * @property {string} day_type - Training split label.
+ * @property {string} info - Day focus description.
+ * @property {number|null} duration_minutes - Planned duration; null for legacy data.
+ * @property {number} [routine_id] - Per-day routine identifier in legacy storage.
+ * @property {PlanExercise[]} exercises - Catalog-backed exercise targets.
+ *
+ * @typedef {object} RoutinePlan
+ * @property {string} name - Plan title.
+ * @property {string} [summary] - Optional overview, at most 600 characters.
+ * @property {string} recovery - Recovery guidance.
+ * @property {'legacy'} [storage_format] - Marks read-only historical templates.
+ * @property {PlanDay[]} days - Ordered training days.
+ *
+ * @typedef {object} WorkoutExercise
+ * @property {number|null} [exerciseId] - Catalog ID; absent/null for custom exercises.
+ * @property {string} name - Exercise name.
+ * @property {string} [muscle] - Optional UI-only muscle label.
+ * @property {number|string} sets - Target count, or in-progress input text.
+ * @property {string} reps - Repetition target text.
+ * @property {string|null} rest - Unit-suffixed duration; null when unknown.
+ * @property {string} [notes] - Editing notes.
+ * @property {number|string} weight - UI weight target or input text.
+ * @property {boolean} completed - Local exercise completion flag.
+ *
+ * @typedef {object} WorkoutRoutine
+ * @property {string} [name] - Plan title.
+ * @property {string} [summary] - Overview.
+ * @property {string} [recovery] - Recovery guidance.
+ * @property {'legacy'} [storageFormat] - Prevents legacy structure/timing edits.
+ * @property {Array<{name: string, focus: string, durationMinutes?: number|null,
+ * routineId?: number, exercises: WorkoutExercise[]}>} days - Editable UI days.
+ */
+
+/**
+ * Checks the complete new-plan contract without accepting legacy templates.
+ * @param {unknown} plan - Untrusted backend or edited payload.
+ * @returns {boolean} Whether the new-plan contract is satisfied.
+ */
 export function isRoutinePlan(plan) {
   return plan?.storage_format !== 'legacy' && validatePlan(plan, false)
 }
 
+/**
+ * Accepts either a new plan or the explicitly marked legacy read-only shape.
+ * @param {unknown} plan - Untrusted saved-routine payload.
+ * @returns {boolean} Whether the payload is safe for routine rendering.
+ */
 export function isSavedRoutinePlan(plan) {
   return plan?.storage_format === 'legacy' ? validatePlan(plan, true) : isRoutinePlan(plan)
 }
 
+/**
+ * Uses explicit plan duration or estimates missing legacy timing from target sets.
+ * Recorded workout durations never influence this planning-only estimate.
+ * @param {PlanDay} day - Validated plan day.
+ * @returns {number} Planned or estimated duration in whole minutes.
+ */
 export function getPlannedSessionMinutes(day) {
   if (day.duration_minutes !== null) return day.duration_minutes
   // Older templates lack timing: allow 5 minutes to warm up, 45 seconds per
@@ -15,6 +79,12 @@ export function getPlannedSessionMinutes(day) {
   return Math.ceil((seconds + (day.exercises.length - 1) * 60) / 60)
 }
 
+/**
+ * Validates nested day/exercise constraints according to storage format.
+ * @param {unknown} plan - Candidate routine.
+ * @param {boolean} legacy - Allows legacy IDs and unknown timing.
+ * @returns {boolean} Whether all fields satisfy the selected contract.
+ */
 function validatePlan(plan, legacy) {
   return Boolean(plan && typeof plan.name === 'string' && plan.name.trim() &&
     typeof plan.recovery === 'string' && plan.recovery.trim() &&
@@ -37,6 +107,11 @@ function validatePlan(plan, legacy) {
         typeof item.notes === 'string')))
 }
 
+/**
+ * Adapts a validated API plan and initializes local-only weight/completion state.
+ * @param {RoutinePlan} plan - Saved or generated routine.
+ * @returns {WorkoutRoutine} UI routine preserving legacy identity and timing.
+ */
 export function toWorkoutRoutine(plan) {
   return {
     name: plan.name,
@@ -62,6 +137,12 @@ export function toWorkoutRoutine(plan) {
   }
 }
 
+/**
+ * Serializes editable targets, excluding local weights and completion flags.
+ * @param {WorkoutRoutine} workout - Current editor state.
+ * @returns {RoutinePlan} Validated new-plan payload.
+ * @throws {Error} For legacy plans, custom exercises, or invalid nested targets.
+ */
 export function toRoutinePlan(workout) {
   if (workout.storageFormat === 'legacy') {
     throw new Error('Legacy workout templates are read-only. Create a new complete plan to save changes.')

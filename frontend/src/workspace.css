@@ -1,0 +1,143 @@
+/* Shared responsive foundation; feature-specific structure stays with its component. */
+html { scrollbar-gutter: stable; scroll-padding-block: 1rem; }
+#root { min-inline-size: 0; }
+body { overflow-wrap: anywhere; line-height: 1.6; }
+img, video { max-inline-size: 100%; }
+button, input, select, textarea, summary { max-inline-size: 100%; }
+button { white-space: normal; }
+button svg, a svg { flex-shrink: 0; }
+:root :is(button, input:not([type="hidden"]), select, textarea, summary) {
+  min-inline-size: 44px;
+  min-block-size: 44px;
+}
+:root :is(input, textarea, select) { font-size: 1rem; }
+:root :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 3px;
+}
+:root input[aria-invalid="true"] { border-color: var(--c-danger); }
+.skip-link { position: fixed; top: 1rem; left: 1rem; z-index: 100; padding: .75rem 1rem; background: var(--bg-cta); color: var(--text-cta); border-radius: .5rem; transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+.app-shell, .main-shell, .chat-layout, .chat-main, .routine-main { min-inline-size: 0; }
+.app-shell { flex-direction: column; min-block-size: 100svh; }
+.app-shell :is(h1, h2, h3, h4) { line-height: 1.35; text-wrap: balance; }
+.app-shell h1 { font-size: clamp(1.75rem, 3vw, 2.5rem); letter-spacing: -.025em; }
+.app-shell p { text-wrap: pretty; }
+.app-shell :is(button, .markdown-response, .composer textarea) { font-size: 1rem; }
+.app-shell :is(small, .eyebrow, .intro-kicker, .panel-label, .workspace-label) { font-size: .875rem; letter-spacing: .04em; }
+.app-shell :is(.chat-intro > p, .section-heading p, .composer-disclaimer) { font-size: .875rem; }
+.sidebar { position: relative; inline-size: 100%; block-size: auto; padding: 1rem; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 1rem; border-inline-end: 0; border-block-end: 1px solid var(--border-subtle); }
+.sidebar .brand { display: inline-flex; align-items: center; min-block-size: 44px; padding: 0; font-size: 1.75rem; }
+.sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; inline-size: 100%; }
+.sidebar .nav-item { inline-size: 100%; padding: .75rem; justify-content: center; gap: .5rem; }
+.sidebar :is(.workspace-label, .new-chat, .sidebar-note, .sidebar-bottom, .nav-active-dot) { display: none; }
+.topbar { position: relative; min-inline-size: 0; flex-wrap: wrap; gap: .75rem; padding: 1rem; }
+.breadcrumbs { flex-wrap: wrap; gap: .5rem; font-size: .875rem; }
+.topbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; min-inline-size: 0; max-inline-size: 100%; }
+.topbar-right .private-label { display: none; }
+.topbar .header-avatar { display: inline-flex; inline-size: 44px; block-size: 44px; }
+.theme-controls, .language-toggle { gap: .5rem; flex-wrap: wrap; }
+.language-toggle { overflow: visible; border: 0; }
+.language-toggle button { padding: .5rem; border: 1px solid var(--border-subtle); border-radius: .5rem; }
+.language-controls > [role="alert"] { position: static; inline-size: auto; max-inline-size: 25rem; margin-block-start: .5rem; }
+.theme-controls .theme-preference { max-inline-size: none; padding: .5rem; border: 1px solid var(--border-subtle); font-size: .875rem; }
+.theme-controls .theme-toggle { flex: 0 0 44px; }
+.chat-shell { block-size: auto; min-block-size: 100svh; overflow: visible; }
+.chat-shell .sidebar { block-size: auto; overflow: visible; }
+.chat-shell .main-shell { min-block-size: auto; }
+.chat-shell .chat-layout { overflow: visible; }
+.chat-layout { display: grid; grid-template-columns: minmax(0, 1fr); inline-size: 100%; max-inline-size: 100%; }
+.chat-shell .chat-main { display: flex; flex-direction: column; overflow: visible; }
+.chat-main, .routine-main { padding: clamp(1rem, 3vw, 2rem); }
+.chat-shell .chat-scroll-area { flex: auto; overflow: visible; scrollbar-gutter: auto; }
+.conversation-header, .message-heading, .message-actions, .composer-bottom, .app-footer { flex-wrap: wrap; gap: .75rem; }
+.conversation-header > span { min-inline-size: 0; flex: 1; }
+.intro-kicker { flex-wrap: wrap; }
+.message { gap: .75rem; }
+.message-avatar { flex: 0 0 1.75rem; }
+.message-body { min-inline-size: 0; }
+.message-heading > span { flex-wrap: wrap; }
+.markdown-response :is(pre, code) { white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown-response a { display: inline-block; min-block-size: 44px; min-inline-size: 44px; max-inline-size: 100%; padding-block: .5rem; text-decoration: underline; }
+.markdown-response table { inline-size: 100%; table-layout: fixed; border-collapse: collapse; }
+.markdown-response :is(td, th) { padding: .5rem; border: 1px solid var(--border-subtle); }
+.routine-preview { flex-wrap: wrap; }
+.routine-preview > span:nth-child(2) { flex: 1; min-inline-size: 0; }
+.routine-preview .preview-action { margin-inline-start: 0; white-space: normal; }
+.suggestions { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+.suggestions button { padding: .75rem; text-align: start; }
+.composer { padding: 1rem; }
+.composer textarea { min-block-size: 5rem; resize: vertical; }
+.composer-bottom > span { flex: 1; min-inline-size: 0; flex-wrap: wrap; }
+.composer-bottom > div { margin-inline-start: auto; }
+.send-button { inline-size: 44px; block-size: 44px; flex-shrink: 0; }
+.enter-hint { display: none; }
+.training-panel, .chat-shell .training-panel { display: block; min-inline-size: 0; overflow: visible; padding: clamp(1rem, 3vw, 2rem); border-inline-start: 0; border-block-start: 1px solid var(--border-subtle); }
+.training-panel :is(.panel-label, .card-topline, .week-card > div:first-child) { flex-wrap: wrap; gap: .5rem; }
+.training-card { max-inline-size: 42rem; padding: 1.25rem; }
+.training-panel .barbell-art { max-inline-size: 20rem; margin-inline: auto; }
+.training-stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: 1rem; }
+.training-stats > div + div { padding-inline-start: 0; border-inline-start: 0; }
+.training-stats strong { overflow-wrap: anywhere; }
+.panel-routine-button { gap: .75rem; white-space: normal; }
+.week-days { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .25rem; }
+.week-days > div { min-inline-size: 0; }
+.week-days > div > span:first-child { font-size: .75rem; }
+.week-days > div > span:last-child { inline-size: 100%; min-block-size: 2rem; block-size: auto; }
+.coach-tip > div { min-inline-size: 0; }
+.coach-tip button { padding-block: .5rem; }
+.app-footer { padding: 1rem; font-size: .875rem; padding-block-end: max(1rem, env(safe-area-inset-bottom)); }
+.app-footer > span:last-child { font-size: .75rem; }
+.section-heading, .routine-summary, .workout-heading, .workout-footer, .routine-coach-banner { flex-wrap: wrap; }
+.section-heading > div, .workout-heading > div { min-inline-size: 0; }
+.routine-summary > div { flex: 1 1 10rem; min-inline-size: 0; }
+.plan-badge { white-space: normal; max-inline-size: 100%; }
+.button-group { flex-wrap: wrap; gap: .75rem; }
+.routine-coach-banner { padding: 1rem; gap: 1rem; }
+.routine-coach-banner > div { flex: 1 1 12rem; min-inline-size: 0; }
+.routine-coach-banner button { margin: 0; inline-size: 100%; }
+.error-message { padding: 1rem; gap: .75rem; overflow-wrap: anywhere; }
+.error-message > span { min-inline-size: 0; flex-basis: 12rem; }
+.empty-routine, .empty-chat { padding: 1.5rem 0; }
+.empty-routine > * + * { margin-block-start: 1rem; }
+.failing-card { max-inline-size: 36rem; }
+
+@media (min-width: 48rem) {
+  .sidebar nav { inline-size: auto; margin-inline-start: auto; }
+  .suggestions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .routine-coach-banner button { inline-size: auto; }
+}
+
+@media (min-width: 64rem) {
+  .app-shell { flex-direction: row; }
+  .sidebar, .chat-shell .sidebar { position: sticky; top: 0; inline-size: 14rem; block-size: 100svh; flex: 0 0 14rem; flex-direction: column; align-items: stretch; padding: 1.5rem 1rem; overflow-y: auto; border-block-end: 0; border-inline-end: 1px solid var(--border-subtle); }
+  .sidebar nav { grid-template-columns: minmax(0, 1fr); inline-size: 100%; margin: 0; }
+  .sidebar .nav-item { justify-content: flex-start; }
+  .sidebar :is(.workspace-label, .new-chat, .sidebar-bottom) { display: block; }
+  .sidebar .new-chat { display: flex; margin: 0; }
+  .sidebar .workspace-label { margin: 1rem 0 0; }
+  .sidebar-bottom { padding-block-start: 1rem; }
+  .sidebar .help-button { padding: .75rem 0; font-size: .875rem; }
+  .sidebar .profile { padding: 1rem 0; }
+  .profile div { min-inline-size: 0; }
+  .profile strong, .profile div span { font-size: .875rem; }
+  .topbar { padding-inline: 1.5rem; }
+  .topbar-right { margin-inline-start: auto; }
+  .enter-hint { display: inline; font-size: .875rem; }
+}
+
+@media (min-width: 80rem) and (min-height: 48rem) {
+  .chat-shell { block-size: 100dvh; min-block-size: 0; overflow: hidden; }
+  .chat-shell .sidebar { block-size: 100%; }
+  .chat-shell .main-shell { min-block-size: 0; }
+  .chat-shell .chat-layout { grid-template-columns: minmax(0, 1fr) minmax(17rem, 23%); min-block-size: 0; overflow: hidden; }
+  .chat-shell .chat-main { min-block-size: 0; overflow: hidden; }
+  .chat-shell .chat-scroll-area { flex: 1; min-block-size: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  .chat-shell .training-panel { overflow-y: auto; border-block-start: 0; border-inline-start: 1px solid var(--border-subtle); padding: 1.25rem; }
+  .sidebar .sidebar-note { display: block; padding-block-start: 1rem; margin: auto 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root *, :root *::before, :root *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  button:active:not(:disabled), .routine-preview:hover, .day-tabs button:hover { transform: none; }
+}

@@ -1,6 +1,19 @@
+/**
+ * @file Compact conversation-level execution progress presentation.
+ * SQL inspection events stay in WorkflowMonitor, while this list exposes public
+ * stage labels. Active CSS animation follows pending state, not a simulated timer.
+ */
 import { Check, Circle, CircleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+/**
+ * Renders observed agent stages without inventing progress before events arrive.
+ * @param {object} props - Execution status properties.
+ * @param {Array<{id: string, label: string, kind?: string}>} [props.steps=[]] - Observed stages.
+ * @param {boolean} [props.pending=false] - Marks the last visible stage as active.
+ * @param {boolean} [props.failed=false] - Marks the final observed stage interrupted.
+ * @returns {import('react').ReactElement|null} Stage list, connecting status, or no content.
+ */
 export default function Pipeline({ steps = [], pending = false, failed = false }) {
   const { t } = useTranslation()
   steps = steps.filter((step) => step.kind !== 'sql')

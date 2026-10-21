@@ -1,8 +1,21 @@
+/**
+ * @file Two-session history comparison view for normalized agent SQL results.
+ * Uses repetitions for bodyweight comparisons and volume for loaded work; missing
+ * session matches remain visibly absent rather than becoming zero-valued workouts.
+ */
 import { ArrowRight, BarChart3, Gauge, Layers, Repeat, Scale, TrendingDown, TrendingUp } from 'lucide-react'
 import { compareWorkouts, formatDate, weightUnit } from '../../features/PastRoutinesReport/report-data/reportData'
 import { useReportFormat } from '../../features/PastRoutinesReport/report-data/useReportFormat'
 import { Delta, KpiStrip, MuscleChip, ReportSection } from './ReportParts'
 
+/**
+ * Labels one compared session using the current report locale.
+ * @param {object} props - Session card properties.
+ * @param {string} props.label - Translated relative-session label.
+ * @param {{date: string|null, day: string|null}} props.session - Session identity.
+ * @param {boolean} [props.latest] - Highlights the most recent session.
+ * @returns {import('react').ReactElement} Date/split card.
+ */
 function SessionCard({ label, session, latest }) {
   const { language } = useReportFormat()
   return <div className={latest ? 'compare-session latest' : 'compare-session'}>
@@ -12,6 +25,16 @@ function SessionCard({ label, session, latest }) {
   </div>
 }
 
+/**
+ * Displays a ranked subset of comparable exercise changes.
+ * @param {object} props - Change-list properties.
+ * @param {string} props.title - Localized heading.
+ * @param {import('lucide-react').LucideIcon} props.icon - Heading symbol.
+ * @param {Array<{name: string, change: number}>} props.items - Non-null relative changes.
+ * @param {string} props.tone - Semantic improvement/regression class.
+ * @param {string} props.empty - Localized empty-state message.
+ * @returns {import('react').ReactElement} Change list or explicit empty state.
+ */
 function ChangeList({ title, icon: Icon, items, tone, empty }) {
   const { number } = useReportFormat()
   return <div className={`change-list ${tone}`}>
@@ -25,12 +48,24 @@ function ChangeList({ title, icon: Icon, items, tone, empty }) {
   </div>
 }
 
+/**
+ * Derives comparison aggregates from route-specific rows; owns no request state.
+ * @param {object} props - Report properties.
+ * @param {import('../../features/PastRoutinesReport/report-data/reportData').ReportRow[]} props.rows - Rank-1/rank-2 session sets.
+ * @returns {import('react').ReactElement} Session, KPI, delta, and paired comparison panels.
+ */
 export default function CompareView({ rows }) {
   const { t, number, weight } = useReportFormat()
   const unit = weightUnit(rows)
   const { latest, previous, exercises, strengths, weaknesses } = compareWorkouts(rows)
   const changed = exercises.filter((exercise) => exercise.change !== null)
   const maxChange = Math.max(0.01, ...changed.map((exercise) => Math.abs(exercise.change)))
+  /**
+   * Labels comparison scores with units appropriate to the exercise load category.
+   * @param {{bodyweight: boolean}} exercise - Metric category.
+   * @param {{score: number}} stats - Compared aggregate.
+   * @returns {string} Localized reps or loaded-volume label.
+   */
   const scoreLabel = (exercise, stats) => (exercise.bodyweight ? `${number(stats.score)} ${t('reps')}` : `${number(stats.score)} ${unit}`)
   return <>
     <div className="compare-sessions">

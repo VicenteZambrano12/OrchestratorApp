@@ -1,3 +1,9 @@
+"""Load deterministic localized guidance when no configured subsystem matches.
+
+This fallback uses YAML rather than another LLM call, so a rejected domain
+request cannot accidentally dispatch to an unsupported tool or subsystem.
+"""
+
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -5,7 +11,19 @@ import yaml
 
 
 def no_system_message(language: str = "EN") -> str:
-	"""Load the user-facing no-match message for the requested language."""
+	"""Read and validate the selected language's no-match response.
+
+    Args:
+        language (str): ``EN`` or ``ES``.
+
+    Returns:
+        str: Configured message, preserving its original whitespace.
+
+    Raises:
+        ValueError: Language, YAML syntax, mapping shape, or message is invalid.
+        OSError: The packaged message file cannot be read.
+    """
+	# 1. Reject unknown languages rather than silently changing response language.
 	if language not in ("ES", "EN"):
 		raise ValueError("language must be ES (Spanish) or EN (English)")
 	path = (
@@ -13,6 +31,7 @@ def no_system_message(language: str = "EN") -> str:
 		/ "config/prompts/nosystem/nosystem.yaml"
 	)
 	try:
+		# 2. Convert syntax errors into the same configuration contract as shape errors.
 		configuration = yaml.safe_load(path.read_text(encoding="utf-8"))
 	except yaml.YAMLError as error:
 		raise ValueError("invalid no_system message YAML") from error

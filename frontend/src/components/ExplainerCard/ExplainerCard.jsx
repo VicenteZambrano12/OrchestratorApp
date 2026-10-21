@@ -1,3 +1,8 @@
+/**
+ * @file Structured exercise-explainer card for validated agent responses.
+ * Coordinates exercise navigation, catalog media, and instruction/insight panels.
+ * Child keys reset gallery, tab, and image-error state when the exercise changes.
+ */
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Dumbbell } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -6,6 +11,12 @@ import ExerciseDetails from './ExerciseDetails'
 import ExerciseGallery from './ExerciseGallery'
 import './ExplainerCard.css'
 
+/**
+ * Displays a decorative catalog icon with a local failure fallback.
+ * @param {object} props - Icon properties.
+ * @param {string|null} [props.url] - Optional backend/external asset path.
+ * @returns {import('react').ReactElement} Resolved thumbnail or dumbbell symbol.
+ */
 function ExerciseIcon({ url }) {
   const [failed, setFailed] = useState(false)
   const src = resolveExerciseAsset(url)
@@ -14,6 +25,12 @@ function ExerciseIcon({ url }) {
     : <Dumbbell size={20} />}</span>
 }
 
+/**
+ * Renders one exercise at a time from a nonempty validated specialist response.
+ * @param {object} props - Card properties.
+ * @param {import('../../features/ExplainerCard/exercise-data/exerciseData').Exercise[]} props.exercises - Ordered response cards.
+ * @returns {import('react').ReactElement} Exercise content with wraparound navigation.
+ */
 export default function ExplainerCard({ exercises }) {
   const { t } = useTranslation()
   const [activeIndex, setActiveIndex] = useState(0)

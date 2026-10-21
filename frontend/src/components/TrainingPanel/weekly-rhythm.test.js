@@ -1,3 +1,9 @@
+/**
+ * @file Regression tests for saved-plan summaries and seven-day workout activity.
+ * Vite-loaded production modules run in happy-dom against independently mocked
+ * routine/history endpoints, covering timing estimates, calendar validation,
+ * localization, cancellation, retries, and profile isolation.
+ */
 import assert from 'node:assert/strict'
 import { after, afterEach, before, beforeEach, test, mock } from 'node:test'
 import { act, createElement } from 'react'
@@ -73,16 +79,32 @@ after(async () => {
   }
 })
 
+/**
+ * Stubs history requests while preserving the standard saved-plan fixture.
+ * @param {(url: string, options: RequestInit) => Promise<Response>} handler - History responder.
+ * @returns {Function} Node test mock for fetch.
+ */
 function mockDays(handler) {
   return mock.method(globalThis, 'fetch', (url, options) =>
     url.endsWith('/routine') ? Response.json(plan) : handler(url, options))
 }
 
+/**
+ * Stubs routine requests while preserving the standard seven-day history fixture.
+ * @param {(url: string, options: RequestInit) => Promise<Response>} handler - Routine responder.
+ * @returns {Function} Node test mock for fetch.
+ */
 function mockRoutine(handler) {
   return mock.method(globalThis, 'fetch', (url, options) =>
     url.endsWith('/routine') ? handler(url, options) : Response.json(days))
 }
 
+/**
+ * Mounts/updates the sidebar with profile-keyed state and an optional refresh token.
+ * @param {number} [userId=7] - Selected test profile.
+ * @param {unknown} [routineRevision] - Dependency token used to trigger routine reads.
+ * @returns {Promise<void>} Resolves after React effects settle.
+ */
 async function render(userId = 7, routineRevision) {
   await act(async () => root.render(createElement(TrainingPanel, {
     key: userId, userId, routineRevision, onOpen: () => {}, onPrompt: () => {},

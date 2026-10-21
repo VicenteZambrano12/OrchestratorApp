@@ -1,5 +1,12 @@
 {
+  "Skip to main content": "Skip to main content",
+  "Session unavailable": "Session unavailable",
+  "Checking the server and preparing your session.": "Checking the server and preparing your session.",
+  "Something went wrong": "Something went wrong",
+  "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.": "The app encountered an unexpected error. Reload to try again. Unsaved changes may be lost.",
+  "Reload app": "Reload app",
   "SYSTEM MAP": "SYSTEM MAP",
+  "Database": "Database",
   "Database source": "Database source",
   "Playing execution": "Playing execution",
   "Full tree always visible. Highlights advance one node per second without delaying the API.": "Full tree always visible. Highlights advance one node per second without delaying the API.",

@@ -1,3 +1,10 @@
+# Deployment inputs for the production orchestration stack.
+#
+# Connects CI/CD project, region, Neon organization, and immutable image inputs
+# to the child modules. Runtime identity and bucket settings select existing
+# operational boundaries; the secret version selects an externally populated
+# application configuration. Secret payloads are not accepted as root inputs.
+
 variable "project_id" {
   type        = string
   description = "The GCP project ID to deploy resources into."
@@ -5,12 +12,12 @@ variable "project_id" {
 
 variable "region" {
   type        = string
-  description = "The GCP region to deploy resources into."
+  description = "Google Cloud region for Cloud Run, Artifact Registry, application storage, and secret replicas; independent of the Neon region."
 }
 
 variable "bucket_name" {
   type        = string
-  description = "The name of the production application bucket."
+  description = "Globally unique private application bucket name; must match the runtime GCS_IMAGES_BUCKET setting used for exercise images."
 }
 
 variable "common_labels" {
@@ -42,7 +49,7 @@ variable "neon_region_id" {
 
 variable "cloud_run_service_account_email" {
   type        = string
-  description = "Dedicated runtime identity with access to the application secrets and images."
+  description = "Existing dedicated Cloud Run service account email; receives secret read access and images/-scoped object read access, not Terraform deployer permissions."
 }
 
 variable "artifact_registry_repository_id" {

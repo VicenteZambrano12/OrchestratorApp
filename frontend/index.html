@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/jpeg" href="/icon.jpeg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F8FAFC" />
     <script>
       // Resolve before styles or React load so the first paint uses the saved theme.
       (() => {
-        let preference = 'system'
+        let preference = 'dark'
         try {
           const saved = localStorage.getItem('form-theme')
           if (['light', 'dark', 'system'].includes(saved)) preference = saved

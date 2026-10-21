@@ -1,9 +1,17 @@
+# Inputs defining the application container repository and retention scope.
+#
+# The production root supplies the project, location, and shared labels; package
+# selection constrains cleanup to the application's image prefix. These inputs
+# configure artifact storage, not CI/CD authentication or repository IAM.
+
 variable "project_id" {
-  type = string
+  type        = string
+  description = "Google Cloud project owning the application Docker repository."
 }
 
 variable "location" {
-  type = string
+  type        = string
+  description = "Artifact Registry location used by the repository and its Docker registry hostname."
 }
 
 variable "repository_id" {
@@ -18,7 +26,7 @@ variable "repository_id" {
 
 variable "image_name" {
   type        = string
-  description = "Application image package governed by the two-version cleanup policies."
+  description = "Docker image package prefix matched by cleanup policies that retain the two most recent matching package versions."
   default     = "orchestratorapp"
 
   validation {
@@ -28,5 +36,6 @@ variable "image_name" {
 }
 
 variable "common_labels" {
-  type = map(string)
+  type        = map(string)
+  description = "Shared ownership and environment labels merged with the artifact-registry component label."
 }

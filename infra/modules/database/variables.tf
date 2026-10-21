@@ -1,3 +1,10 @@
+# Database provisioning and credential-publication inputs for the parent stack.
+#
+# Separates Neon organization, region, and SQL ownership from the Google Cloud
+# project and replica holding connection credentials. The runtime principal is
+# supplied externally and receives read access, not deployment permissions.
+# Identifier validation guards provider naming rules and reserved SQL names.
+
 variable "project_id" {
   type        = string
   description = "The GCP project containing the database connection secret."

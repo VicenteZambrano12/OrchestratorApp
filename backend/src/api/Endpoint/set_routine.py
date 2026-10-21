@@ -1,3 +1,10 @@
+"""Persist a supplied routine or confirm an exact cached client-side preview.
+
+Direct plan saves create active versions through the repository. Paired preview
+identifiers instead use the shared confirmation helper and synchronize chat
+memory. Neither path invokes routing, system prompts, or an LLM.
+"""
+
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path as ApiPath, Query, Response
@@ -43,11 +50,41 @@ def set_active_routine(
     exact cached preview idempotently, preserve its parameters, and update chat
     state and memory. Stale, mismatched, or unavailable previews return 422.
     Without those query parameters, save the supplied routine as a new version.
+
+    The JSON body is a RoutinePlan: name, optional summary, one to seven days
+    with timed sessions and exercise prescriptions, and recovery guidance.
+    Persistence additionally validates catalog references and day structure.
+    ``language`` is an EN/ES query value defaulting to EN, used for confirmation
+    text. Profile selection is not authentication or authorization.
+
+    Args:
+        user_id (int): Positive database user ID from the path.
+        response (Response): Mutable response for the ``X-Routine-Id`` header.
+        routine (RoutinePlan): Validated JSON plan to save or match to the draft.
+        repository (RoutineRepository): Injected routine persistence dependency.
+        state_store (RoutineStore): Shared session/user-scoped draft cache.
+        turn_setter (SetTurn): Adapter recording confirmed previews in memory.
+        session_id (str | None): Optional nonempty session query parameter.
+        draft_id (str | None): Optional nonempty preview ID paired with session_id.
+        language (Literal["EN", "ES"]): Confirmation-message language.
+
+    Returns:
+        RoutinePlan: HTTP 200 with the supplied plan and saved database ID in
+        ``X-Routine-Id``.
+
+    Raises:
+        HTTPException: With HTTP 404 for an invalid/nonexistent user or HTTP 422
+            for unpaired preview IDs, mismatched/unavailable drafts, or invalid
+            plan data. FastAPI also rejects invalid request fields with 422.
+        RuntimeError: If persistence supplies no saved ID; becomes HTTP 500.
+        Exception: Other storage/configuration failures become HTTP 500.
     """
+    # 1. Resolve profile existence before interpreting optional confirmation state.
     try:
         repository.validate_user(user_id)
     except RoutineInputError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    # 2. Keep deterministic preview confirmation distinct from an ordinary new save.
     if (session_id is None) != (draft_id is None):
         raise HTTPException(status_code=422, detail="session_id and draft_id must be supplied together.")
     try:
@@ -60,16 +97,19 @@ def set_active_routine(
             if result.status != "saved":
                 raise RoutineInputError(result.message)
             routine_id = result.routine_id
+            # 3. Mirror confirmed plans into conversation memory without a user query.
             turn_setter.set(
                 session_id, "", result.message, "routine_maker",
                 routine=routine.model_dump(mode="json"),
             )
         else:
             routine_id = repository.set_active_routine(user_id, routine)
+    # 4. Present domain and plan-validation failures as client-correctable input.
     except RoutineInputError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except ValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    # 5. Return persistence identity in a header while preserving the plan body.
     if routine_id is None:
         raise RuntimeError("The saved routine has no database ID.")
     response.headers["X-Routine-Id"] = str(routine_id)

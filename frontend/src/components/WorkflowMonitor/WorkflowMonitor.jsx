@@ -1,3 +1,9 @@
+/**
+ * @file Live orchestrator trace inspector rendered into a separate browser window.
+ * React portals keep request/translation updates connected to MainView while a
+ * one-node-per-second playback animates observed stages without delaying the API.
+ * The popup mirrors parent theme/locale and is closed on owner teardown.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Activity, Code2, Database, GitBranch, Maximize2, X } from 'lucide-react'
@@ -5,6 +11,16 @@ import { useTranslation } from 'react-i18next'
 import { buildWorkflowGraph, fitWorkflowGraph, graphNodeId, playbackEvents } from './workflowGraph'
 import './WorkflowMonitor.css'
 
+const edgeLayers = { idle: 0, done: 1, active: 2, failed: 3 }
+
+/**
+ * Presents the full architecture tree with time-revealed execution highlights.
+ * Local revealed/finished state intentionally lags actual terminal status for
+ * readable playback. The parent keys this component by request to reset playback.
+ * @param {object} props - Diagram properties.
+ * @param {import('./workflowGraph').WorkflowTrace} props.trace - Live request snapshot.
+ * @returns {import('react').ReactElement} Diagram, selected-node details, and response/event inspection.
+ */
 export function WorkflowDiagram({ trace }) {
   const { t } = useTranslation()
   const events = useMemo(() => playbackEvents(trace.steps, trace.status), [trace.steps, trace.status])
@@ -17,39 +33,58 @@ export function WorkflowDiagram({ trace }) {
   const hasNext = revealed < events.length
 
   useEffect(() => {
+    // 1. Reveal one already-observed event per second, independently of API timing.
     if (hasNext) {
       const timer = setTimeout(() => setRevealed((count) => count + 1), 1000)
+      // 2. Cancel the previous tick when the revealed prefix or event availability changes.
       return () => clearTimeout(timer)
     }
   }, [revealed, hasNext])
 
   useEffect(() => {
+    // 1. Delay terminal coloring until the observed playback prefix catches up.
     if (!hasNext && terminal && !finished) {
       const timer = setTimeout(() => setFinished(true), 1000)
+      // 2. Cancel a pending finish tick if new observed events arrive.
       return () => clearTimeout(timer)
     }
   }, [hasNext, terminal, finished])
 
   useEffect(() => {
+    // 1. Measure using the viewport's own window, including when rendered in a popup.
     const viewport = viewportRef.current
     const observer = new viewport.ownerDocument.defaultView.ResizeObserver(([entry]) => {
       setSize({ width: entry.contentRect.width, height: entry.contentRect.height })
     })
+    // 2. Refit on resize and disconnect measurement when the diagram unmounts.
     observer.observe(viewport)
     return () => observer.disconnect()
   }, [])
 
   const visibleEvents = events.slice(0, revealed)
+  // Playback may still run after the actual backend request has completed or failed.
   const status = trace.status === 'idle' ? 'idle' : finished ? trace.status : 'running'
   const graph = buildWorkflowGraph(visibleEvents, status)
-  const { nodes, width, height } = graph
+  const { nodes, edges, width, height } = graph
   const selected = nodes.find(({ id }) => id === selectedId)
   const activeEvent = visibleEvents.at(-1)
   const activeNode = nodes.find(({ id }) => id === graphNodeId(activeEvent ?? { id: '' }))
   const inspected = selected ?? activeNode
   const scale = fitWorkflowGraph(size, graph)
+  const databaseLaneY = nodes.find(({ id }) => id === 'orchestrator').y + 76 + 16
   const statusLabel = status === 'running' && terminal ? 'Playing execution' :
     { idle: 'Waiting for a request', running: 'Live', complete: 'Complete', failed: 'Interrupted' }[status]
+
+  function renderNode(node) {
+    const Icon = node.kind === 'sql' ? Code2 : node.kind === 'source' ? Database : node.id === 'orchestrator' ? GitBranch : Activity
+    const detail = (node.kind === 'sql' || node.kind === 'source') && node.source ? node.source :
+      t({ idle: 'Not visited', done: 'Complete', active: 'In progress', failed: 'Interrupted' }[node.state])
+    return <button key={node.id} data-node-id={node.id} className={`workflow-node ${node.state}${node.kind === 'source' ? ' database-node' : ''}${selectedId === node.id ? ' selected' : ''}`}
+      style={{ left: node.x, top: node.y }}
+      onClick={() => setSelectedId(node.id)} aria-pressed={selectedId === node.id}>
+      <Icon size={24} aria-hidden="true" /><span><strong>{t(node.label)}</strong><small title={detail}>{detail}</small></span>
+    </button>
+  }
 
   return <main className="workflow-monitor">
     <header className="workflow-heading">
@@ -66,27 +101,24 @@ export function WorkflowDiagram({ trace }) {
         <section ref={viewportRef} className="workflow-viewport" aria-label={t('Request node diagram')}>
           <div className="workflow-canvas" style={{ width, height, transform: `translate(-50%, -50%) scale(${scale})` }}>
             <svg width={width} height={height} aria-hidden="true">
-              {nodes.filter(({ parent }) => parent).map((node) => {
-                const parent = nodes.find(({ id }) => id === node.parent)
+              {edges.toSorted((a, b) => edgeLayers[a.state] - edgeLayers[b.state]).map((edge) => {
+                const parent = nodes.find(({ id }) => id === edge.from)
+                const node = nodes.find(({ id }) => id === edge.to)
                 const x1 = parent.x + 140
                 const y1 = parent.y + 76
                 const x2 = node.x + 140
                 const y2 = node.y
                 const side = parent.x + 302
-                const path = parent.x === node.x && y2 - y1 > 50
+                const path = node.id === 'database'
+                  ? `M ${parent.x} ${parent.y + 38} H ${parent.x - 12} V ${databaseLaneY} H ${node.x - 12} V ${node.y + 38} H ${node.x}`
+                  : parent.x === node.x && y2 - y1 > 50
                   ? `M ${parent.x + 280} ${parent.y + 38} H ${side} V ${node.y + 38} H ${node.x + 280}`
                   : `M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`
-                return <path key={node.id} className={`workflow-edge ${node.state}`} d={path} />
+                return <path key={edge.id} data-edge-from={edge.from} data-edge-to={edge.to}
+                  className={`workflow-edge ${edge.state}`} d={path} />
               })}
             </svg>
-            {nodes.map((node) => {
-              const Icon = node.kind === 'sql' ? Code2 : node.kind === 'source' ? Database : node.id === 'orchestrator' ? GitBranch : Activity
-              return <button key={node.id} data-node-id={node.id} className={`workflow-node ${node.state}${selectedId === node.id ? ' selected' : ''}`}
-                style={{ left: node.x, top: node.y }} onClick={() => setSelectedId(node.id)} aria-pressed={selectedId === node.id}>
-                <Icon size={24} /><span><strong>{t(node.label)}</strong><small>{node.kind === 'sql' && node.source ? node.source :
-                  t({ idle: 'Not visited', done: 'Complete', active: 'In progress', failed: 'Interrupted' }[node.state])}</small></span>
-              </button>
-            })}
+            {nodes.map(renderNode)}
           </div>
         </section>
       </section>
@@ -98,6 +130,7 @@ export function WorkflowDiagram({ trace }) {
             {selected && <button className="icon-button" aria-label={t('Close node details')} onClick={() => setSelectedId(null)}><X size={16} /></button>}
           </div>
           {inspected?.sql ? <><p><Database size={16} />{inspected.source}</p><pre>{inspected.sql}</pre><small>{t('Bound values and database rows are not displayed.')}</small></> :
+            inspected?.kind === 'source' ? <><p><Database size={16} />{inspected.source ?? t('Database source')}</p><small>{t('Bound values and database rows are not displayed.')}</small></> :
             <p>{t('Live execution stages, not private model reasoning. Select a node for details.')}</p>}
         </section>
         {trace.error && <section className="workflow-error" role="alert">{trace.error}</section>}
@@ -120,25 +153,39 @@ export function WorkflowDiagram({ trace }) {
   </main>
 }
 
+/**
+ * Opens and owns the separate live-map window while consuming current trace props.
+ * Popup state retains the native window and portal container; local errors expose
+ * blocked popups instead of silently hiding the requested inspector.
+ * @param {object} props - Monitor launcher properties.
+ * @param {import('./workflowGraph').WorkflowTrace} props.trace - Current request snapshot.
+ * @returns {import('react').ReactElement} Launcher, optional popup error, and portal.
+ */
 export default function WorkflowMonitor({ trace }) {
   const { t, i18n } = useTranslation()
   const [popup, setPopup] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    // 1. Synchronize appearance only while a popup window is owned by this component.
     if (!popup) return
     const child = popup.window
+    /** @returns {void} Mirrors theme classes into the popup's separate document. */
     const syncAppearance = () => {
       child.document.documentElement.setAttribute('class', document.documentElement.className)
     }
     syncAppearance()
     const observer = new MutationObserver(syncAppearance)
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    // 2. Link window lifecycles so neither parent teardown nor manual close leaves a portal.
+    /** @returns {void} Releases React's reference when the user closes the native popup. */
     const onClose = () => setPopup(null)
+    /** @returns {void} Closes the owned popup when its parent page is leaving. */
     const onParentClose = () => child.close()
     child.addEventListener('beforeunload', onClose)
     window.addEventListener('pagehide', onParentClose)
     return () => {
+      // 3. Remove cross-document listeners before closing the owned window.
       observer.disconnect()
       child.removeEventListener('beforeunload', onClose)
       window.removeEventListener('pagehide', onParentClose)
@@ -147,22 +194,34 @@ export default function WorkflowMonitor({ trace }) {
   }, [popup])
 
   useEffect(() => {
+    // 1. Keep the popup's metadata synchronized with subsequent locale changes.
     if (!popup) return
     popup.window.document.documentElement.setAttribute('lang', i18n.resolvedLanguage)
     popup.window.document.querySelector('title').replaceChildren(t('Live request flow'))
   }, [popup, i18n.resolvedLanguage, t])
 
+  /**
+   * Reuses an existing inspector or creates a same-origin, styled portal target.
+   * @returns {void} Publishes the popup or a visible browser-blocking error.
+   */
   function openMonitor() {
+    // 1. Focus an existing inspector rather than creating duplicate windows.
     if (popup && !popup.window.closed) {
       popup.window.focus()
       return
     }
+    // 2. Open directly from user activation and expose popup-blocker failures.
     const child = window.open('', '', 'popup=yes,width=1440,height=960,resizable=yes,scrollbars=yes')
     if (!child) {
       setError(t('The live map window was blocked. Allow pop-ups for this site and try again.'))
       return
     }
+    // 3. Copy current styles and create a dedicated React portal mount.
     child.document.title = t('Live request flow')
+    const viewport = child.document.createElement('meta')
+    viewport.name = 'viewport'
+    viewport.content = 'width=device-width, initial-scale=1'
+    child.document.head.appendChild(viewport)
     child.document.body.classList.add('workflow-window')
     document.querySelectorAll('style, link[rel="stylesheet"]').forEach((style) => {
       child.document.head.appendChild(style.cloneNode(true))

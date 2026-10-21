@@ -1,8 +1,20 @@
+/**
+ * @file Read-only structured routine draft rendered inside agent conversation replies.
+ * Local day navigation previews complete new-format plans; persistence and explicit
+ * confirmation remain owned by the conversation view, not this presentation layer.
+ */
 import { useId, useState } from 'react'
 import { Calendar, Clock3, Dumbbell, HelpCircle, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import './RoutineMaker.css'
 
+/**
+ * Presents planned timing, exercise targets, and recovery guidance from an AI draft.
+ * @param {object} props - Preview properties.
+ * @param {import('../../features/RoutineMaker/routine-data/routineData').RoutinePlan} props.routine - Validated non-legacy plan.
+ * @param {(name: string) => void} [props.onExplainExercise] - Seeds a follow-up chat prompt.
+ * @returns {import('react').ReactElement} Accessible day-tabbed routine preview.
+ */
 export default function RoutineMaker({ routine, onExplainExercise }) {
   const { t } = useTranslation()
   const [activeDay, setActiveDay] = useState(0)
@@ -12,13 +24,21 @@ export default function RoutineMaker({ routine, onExplainExercise }) {
   const min = Math.min(...durations)
   const max = Math.max(...durations)
 
+  /**
+   * Implements wraparound arrow/Home/End day-tab navigation and focus alignment.
+   * @param {import('react').KeyboardEvent<HTMLButtonElement>} event - Tab key event.
+   * @param {number} index - Current zero-based tab.
+   * @returns {void}
+   */
   function onTabKey(event, index) {
+    // 1. Resolve only the keys supported by the roving-tab interaction.
     const count = routine.days.length
     const next = {
       ArrowRight: (index + 1) % count, ArrowLeft: (index - 1 + count) % count,
       Home: 0, End: count - 1,
     }[event.key]
     if (next === undefined) return
+    // 2. Prevent page scrolling and move both selected content and keyboard focus.
     event.preventDefault()
     setActiveDay(next)
     document.getElementById(`${id}-day-${next}`)?.focus()
@@ -48,18 +68,20 @@ export default function RoutineMaker({ routine, onExplainExercise }) {
     <section className="routine-maker-day" id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-day-${activeDay}`}>
       <p>{day.info}</p>
       <div className="routine-maker-table-scroll">
-        <table>
+        <table role="table">
           <caption>{t('workoutDay', { day: day.day_type })}</caption>
-          <thead><tr><th scope="col">{t('EXERCISE')}</th><th scope="col">{t('SETS')}</th><th scope="col">{t('REPS')}</th><th scope="col">{t('Rest')}</th></tr></thead>
-          <tbody>{day.exercises.map((exercise, index) => <tr key={exercise.exercise_id}>
-            <th scope="row"><div className="routine-maker-exercise">
+          <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">{t('EXERCISE')}</th><th role="columnheader" scope="col">{t('SETS')}</th><th role="columnheader" scope="col">{t('REPS')}</th><th role="columnheader" scope="col">{t('Rest')}</th></tr></thead>
+          <tbody role="rowgroup">{day.exercises.map((exercise, index) => <tr role="row" key={exercise.exercise_id}>
+            <th role="rowheader" scope="row"><div className="routine-maker-exercise">
               <span className="routine-maker-number">{String(index + 1).padStart(2, '0')}</span>
               <div><strong>{exercise.name}</strong>{exercise.notes && <p>{exercise.notes}</p>}</div>
               {onExplainExercise && <button type="button" className="icon-button"
                 aria-label={t('Explain {{exercise}}', { exercise: exercise.name })}
                 onClick={() => onExplainExercise(exercise.name)}><HelpCircle size={17} aria-hidden="true" /></button>}
             </div></th>
-            <td>{exercise.sets}</td><td>{exercise.reps}</td><td>{exercise.rest_seconds}s</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('SETS')}</span>{exercise.sets}</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('REPS')}</span>{exercise.reps}</td>
+            <td role="cell"><span className="routine-maker-cell-label">{t('Rest')}</span>{exercise.rest_seconds}s</td>
           </tr>)}</tbody>
         </table>
       </div>

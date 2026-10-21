@@ -1,3 +1,8 @@
+/**
+ * @file Illustrative workout-history fixtures for the offline demo reply path.
+ * Synthetic dates are relative to today; these rows never represent persisted
+ * user workouts and explanations explicitly label them as demo data.
+ */
 const PUSH = [
   ['Barbell Bench Press', 'chest', [[8, 70], [8, 70], [6, 75], [6, 75]]],
   ['Seated Dumbbell Shoulder Press', 'shoulders', [[10, 22], [10, 22], [8, 24]]],
@@ -21,12 +26,28 @@ const LEGS = [
   ['Plank', 'core', [[1, 0], [1, 0]]],
 ]
 
+/**
+ * Creates a local calendar date for relative demo history.
+ * @param {number} days - Days before today.
+ * @returns {string} YYYY-MM-DD date without timezone conversion.
+ */
 function isoDaysAgo(days) {
   const date = new Date()
   date.setDate(date.getDate() - days)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+/**
+ * Expands compact exercise tuples into illustrative backend-style set rows.
+ * @param {number} trainingId - Synthetic session identifier.
+ * @param {number} daysAgo - Relative session date.
+ * @param {string} dayName - Split label.
+ * @param {Array<[string, string, Array<[number, number]>]>} exercises - Name/muscle/reps-load tuples.
+ * @param {object} [options={}] - Fixture adjustments.
+ * @param {number} [options.bump=0] - Synthetic progression adjustment.
+ * @param {object} [options.extra={}] - Additional route-specific scalar fields.
+ * @returns {import('./reportData').ReportRow[]} Expanded set rows.
+ */
 function session(trainingId, daysAgo, dayName, exercises, { bump = 0, extra = {} } = {}) {
   return exercises.flatMap(([name, muscle, sets], exerciseIndex) => sets.map(([reps, weight], setIndex) => ({
     training_id: trainingId,
@@ -46,6 +67,11 @@ function session(trainingId, daysAgo, dayName, exercises, { bump = 0, extra = {}
   })))
 }
 
+/**
+ * Selects a comparison, weekly, or last-session demonstration from prompt keywords.
+ * @param {string} query - Demo prompt, not sent to the backend.
+ * @returns {import('./reportData').PastRoutinesAnalysis} Labeled illustrative report.
+ */
 export function demoPastRoutinesAnalysis(query) {
   if (/compar|last two|vs|versus/i.test(query)) {
     return {

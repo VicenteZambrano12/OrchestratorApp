@@ -1,3 +1,13 @@
+"""Define typed contracts and guardrails for routine generation and persistence.
+
+Pydantic models separate collected user requirements, requested edits, generated
+plans, routing decisions, and session-cached workflow state. Context-aware plan
+validation checks generated output against the exercise catalog and available
+training time before confirmation. Legacy models expose saved workout templates
+without inventing missing duration or rest guidance. The immutable result
+envelope carries workflow outcomes back to the pipeline and HTTP response layer.
+"""
+
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
@@ -20,7 +30,15 @@ ROUTINE_PLAN_EXAMPLE = {
 
 
 class RoutineParameters(BaseModel):
-    """Known requirements; None means the user still needs to supply a value."""
+    """Collect routine requirements while preserving unknown values as None.
+
+    Attributes:
+        routine_type (Literal["weider", "ppl"] | None): Requested split.
+        days_per_week (int | None): Strict integer from one through seven.
+        hours_per_session (float | None): Finite positive hours, at most 24.
+        level (Literal["beginner", "intermediate", "advanced"] | None):
+            Experience level used to filter the exercise catalog.
+    """
 
     model_config = ConfigDict(
         extra="forbid",
@@ -57,12 +75,30 @@ class RoutineParameters(BaseModel):
 
     @property
     def missing_fields(self) -> tuple[str, ...]:
+        """Identify requirements still needed before generating a plan.
+
+        Returns:
+            tuple[str, ...]: Field names whose current values are None, in
+                model field order.
+        """
+        # 1. Preserve unknown requirements instead of letting the model infer them.
         return tuple(
             name for name, value in self.model_dump().items() if value is None
         )
 
 
 class RoutineChange(BaseModel):
+    """Describe an exercise edit independently of the generated plan.
+
+    Attributes:
+        action (Literal["add", "remove", "replace", "adjust"] | None):
+            Requested operation, or None when not collected.
+        day (int | None): One-based training day from one through seven.
+        exercise_id (int | None): Positive catalog ID targeted by the edit.
+        replacement_exercise_id (int | None): Positive replacement ID.
+        details (str | None): Nonempty adjustment instructions when supplied.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["add", "remove", "replace", "adjust"] | None = None
@@ -73,6 +109,13 @@ class RoutineChange(BaseModel):
 
     @property
     def missing_fields(self) -> list[str]:
+        """Identify fields required to execute the requested edit.
+
+        Returns:
+            list[str]: Missing common fields plus replacement or adjustment
+                details required by the selected action.
+        """
+        # 1. Require explicit edit targets rather than permitting speculative changes.
         missing = [name for name in ("action", "day", "exercise_id") if getattr(self, name) is None]
         if self.action == "replace" and self.replacement_exercise_id is None:
             missing.append("replacement_exercise_id")
@@ -82,6 +125,17 @@ class RoutineChange(BaseModel):
 
 
 class RoutineExercise(BaseModel):
+    """Represent one catalog-referenced exercise prescription.
+
+    Attributes:
+        exercise_id (int): Positive strict catalog identifier.
+        name (str): Display name, replaced from catalog during contextual validation.
+        sets (int): Strict set count from one through twenty.
+        reps (str): Nonempty repetition prescription.
+        rest_seconds (int): Strict rest interval from zero through 900 seconds.
+        notes (str): Optional textual training guidance, defaulting to empty.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     exercise_id: int = Field(strict=True, gt=0)
@@ -93,6 +147,16 @@ class RoutineExercise(BaseModel):
 
 
 class RoutineDay(BaseModel):
+    """Group exercise prescriptions into a timed training day.
+
+    Attributes:
+        day (int): Strict day number from one through seven.
+        day_type (str): Nonempty training-day label.
+        info (str): Nonempty day-level instructions.
+        duration_minutes (float): Finite positive session duration.
+        exercises (list[RoutineExercise]): Nonempty exercise sequence.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     day: int = Field(strict=True, ge=1, le=7)
@@ -103,10 +167,32 @@ class RoutineDay(BaseModel):
 
 
 class LegacyRoutineExercise(RoutineExercise):
+    """Expose a saved template exercise without fabricated rest guidance.
+
+    Attributes:
+        rest_seconds (None): Rest timing was not recorded in legacy storage.
+        exercise_id (int): Positive catalog identifier inherited from the base.
+        name (str): Stored exercise display name.
+        sets (int): Set count, retaining the base model's one-to-twenty constraint.
+        reps (str): Nonempty stored repetition description.
+        notes (str): Stored set metrics or descriptive guidance.
+    """
+
     rest_seconds: None = None
 
 
 class LegacyRoutineDay(RoutineDay):
+    """Represent one legacy workout template as a displayable routine day.
+
+    Attributes:
+        day (int): Positive display position without the modern seven-day limit.
+        routine_id (int): Positive source template identifier.
+        duration_minutes (None): Session duration was not recorded.
+        exercises (list[LegacyRoutineExercise]): Nonempty legacy exercise list.
+        day_type (str): Inherited nonempty training-day label.
+        info (str): Inherited nonempty day-level description.
+    """
+
     day: int = Field(strict=True, ge=1)
     routine_id: int = Field(strict=True, gt=0)
     duration_minutes: None = None
@@ -114,6 +200,16 @@ class LegacyRoutineDay(RoutineDay):
 
 
 class LegacyRoutinePlan(BaseModel):
+    """Expose legacy templates without claiming modern generation completeness.
+
+    Attributes:
+        storage_format (Literal["legacy"]): Legacy-format discriminator.
+        name (str): Combined template display name.
+        summary (str): Description of the reconstructed templates.
+        recovery (str): Recovery description or explicit unavailable-data text.
+        days (list[LegacyRoutineDay]): Nonempty reconstructed template sequence.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     storage_format: Literal["legacy"] = "legacy"
@@ -124,7 +220,14 @@ class LegacyRoutinePlan(BaseModel):
 
 
 class RoutinePlan(BaseModel):
-    """A weekly routine containing only catalog exercise references."""
+    """Hold a weekly plan with optional context-aware generation validation.
+
+    Attributes:
+        name (str): Nonempty routine title.
+        summary (str): Plan explanation, at most 600 characters; defaults to empty.
+        days (list[RoutineDay]): One through seven training days.
+        recovery (str): Nonempty recovery guidance.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -135,8 +238,26 @@ class RoutinePlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_catalog_plan(self, info: ValidationInfo) -> "RoutinePlan":
+        """Check generated plans against supplied requirements and catalog.
+
+        Args:
+            info: Pydantic validation context. When present, it must contain
+                ``parameters`` and ``catalog``; ``require_summary`` optionally
+                requires a nonblank summary.
+
+        Returns:
+            RoutinePlan: This plan, with exercise names replaced by catalog names.
+                Without context, only normal field validation applies.
+
+        Raises:
+            ValueError: Summary, day count/order, timing, exercise uniqueness,
+                catalog membership, or catalog names violate the guardrails.
+            KeyError: A supplied validation context lacks required entries.
+        """
+        # 1. Permit ordinary deserialization without generation-specific context.
         if not info.context:
             return self
+        # 2. Enforce user requirements before accepting a generated preview.
         if info.context.get("require_summary") and not self.summary.strip():
             raise ValueError("Routine requires a brief summary explaining the plan.")
         parameters = info.context["parameters"]
@@ -145,6 +266,7 @@ class RoutinePlan(BaseModel):
             raise ValueError("Routine must contain exactly days_per_week training days.")
         if [day.day for day in self.days] != list(range(1, len(self.days) + 1)):
             raise ValueError("Routine day numbers must be consecutive and unique, starting at 1.")
+        # 3. Reject unsupported prescriptions and replace model-authored catalog names.
         for day in self.days:
             if parameters.hours_per_session is None or day.duration_minutes > parameters.hours_per_session * 60:
                 raise ValueError("Routine session duration exceeds the requested time.")
@@ -162,6 +284,18 @@ class RoutinePlan(BaseModel):
 
 
 class _RoutingDecision(BaseModel):
+    """Validate the routine agent's structured action-classification output.
+
+    Attributes:
+        intent (Literal["create", "update_saved", "update_draft", "save", "no_match"]):
+            Selected workflow branch.
+        parameters (RoutineParameters): Requirements extracted from the query.
+        message (str): Strict text, nonblank for unsupported requests.
+        routine_id (int | None): Positive saved routine selected for editing.
+        change (RoutineChange): Collected exercise edit, empty by default.
+        start_new (bool): Whether creation should discard the previous draft.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     intent: Literal["create", "update_saved", "update_draft", "save", "no_match"]
@@ -173,6 +307,16 @@ class _RoutingDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_no_match_message(self) -> "_RoutingDecision":
+        """Require useful no-match text and confirmation-only save decisions.
+
+        Returns:
+            _RoutingDecision: This validated classification.
+
+        Raises:
+            ValueError: A no-match reply is blank, or save also proposes new
+                requirements, edits, a reset, or a routine selection.
+        """
+        # 1. Keep unsupported requests explicit and save confirmations unambiguous.
         if self.intent == "no_match" and not self.message.strip():
             raise ValueError("no_match requires a non-empty message")
         if self.intent == "save" and (
@@ -184,6 +328,22 @@ class _RoutingDecision(BaseModel):
 
 
 class RoutineState(BaseModel):
+    """Cache one user's routine workflow within a caller-supplied session.
+
+    Attributes:
+        parameters (RoutineParameters): Collected generation requirements.
+        routine (RoutinePlan | None): Current preview or selected saved plan.
+        source_routine_id (int | None): Saved version from which an edit began.
+        workflow (Literal["create", "update_saved", "update_draft"]): Active branch.
+        change (RoutineChange): Pending exercise edit.
+        awaiting_confirmation (bool): Whether the current preview may be confirmed.
+        draft_id (str | None): Identity of the latest generated preview.
+        saved_routine_id (int | None): Persisted version for an already saved draft.
+        requests (list[str]): Queries accumulated within the workflow.
+        selection_parameters (dict[str, object]): Requirements collected while
+            waiting for the user to choose a saved routine.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     parameters: RoutineParameters = Field(default_factory=RoutineParameters)
@@ -200,7 +360,18 @@ class RoutineState(BaseModel):
 
 @dataclass(frozen=True)
 class RoutineMakerResult:
-    """Routine-generation outcome with collected requirements and a localized message."""
+    """Return an immutable routine workflow outcome to the pipeline and API.
+
+    Attributes:
+        status (Literal["needs_parameters", "needs_changes", "needs_routine",
+            "awaiting_confirmation", "save_requested", "saved", "no_match"]):
+            Workflow outcome; only ``saved`` denotes completed persistence.
+        parameters (RoutineParameters): Requirements collected so far.
+        message (str): Localized explanation or follow-up request.
+        routine (RoutinePlan | None): Structured plan when available.
+        routine_id (int | None): Persisted version ID, otherwise None.
+        draft_id (str | None): Preview identity for direct client confirmation.
+    """
 
     __pydantic_config__ = ConfigDict(
         json_schema_extra={

@@ -1,3 +1,9 @@
+# Inputs defining the application configuration secret and its runtime reader.
+#
+# The parent environment supplies placement, naming, labels, and an existing
+# service account. Payloads and populated-version selection are deliberately
+# outside this interface so LLM credentials are not Terraform input values.
+
 variable "project_id" {
   type        = string
   description = "GCP project in which to create the application JSON secret."

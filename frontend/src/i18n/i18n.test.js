@@ -1,3 +1,9 @@
+/**
+ * @file Cross-feature localization and frontend-contract regression suite.
+ * Vite-loaded application modules are exercised with static rendering and isolated
+ * happy-dom roots. Mocked APIs cover specialist validation/rendering, routine
+ * confirmation, profile activation, theme persistence, and translated recovery UI.
+ */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { after, before, test, mock } from 'node:test'
@@ -355,8 +361,10 @@ test('routine JSON renders localized metadata, day tabs and exercise tables inst
         assert.equal((markup.match(/role="tab"/g) || []).length, count)
         assert.equal((markup.match(/aria-selected="true"/g) || []).length, 1)
         assert.match(markup, /role="tabpanel"/)
-        assert.match(markup, /<table>/)
-        assert.match(markup, /<td>4<\/td><td>8-12<\/td><td>90s<\/td>/)
+        assert.match(markup, /<table role="table">/)
+        for (const [label, value] of [['SETS', '4'], ['REPS', '8-12'], ['Rest', '90s']]) {
+          assert.ok(markup.includes(`<td role="cell"><span class="routine-maker-cell-label">${translations.default.t(label)}</span>${value}</td>`))
+        }
         assert.ok(markup.includes(language === 'es' ? 'Días de entrenamiento' : 'Training days'))
         assert.ok(markup.includes(language === 'es' ? 'Explicar Catalog Press' : 'Explain Catalog Press'))
         assert.equal(markup.split(routine.summary).length - 1, 1)
@@ -435,6 +443,14 @@ test('past routine responses are validated and comparison helpers find strengths
       fetch.mock.restore()
     }
   }
+  /**
+   * Creates paired-session measurements for loaded/bodyweight metric assertions.
+   * @param {number} rank - Latest (1) or previous (2) session.
+   * @param {string} name - Exercise identity.
+   * @param {number} reps - Actual repetitions.
+   * @param {number} weight - Actual external load.
+   * @returns {object} Scalar history row.
+   */
   const row = (rank, name, reps, weight) => ({ training_rank: rank, exercise_name: name, exercise_order: 1, set_number: 1, reps, weight, primary_muscle: 'chest' })
   const comparison = reportData.compareWorkouts([
     row(1, 'Bench', 8, 80), row(2, 'Bench', 8, 70),
@@ -546,6 +562,11 @@ test('button and chat saves render the same localized confirmation without repea
       const buttonSave = await chat.requestRoutineSave('session', routine, 'draft', signal, language.toUpperCase(), 7)
       const chatSave = await chat.requestChat('Save this routine', 'session', signal, language.toUpperCase(), 7)
       assert.equal(fetch.mock.callCount(), 3)
+      /**
+       * Renders normalized save replies to compare button and chat-confirmation UI.
+       * @param {import('../features/ai-chat/api/chat').ChatResult} result - Saved-plan reply.
+       * @returns {string} Static confirmation markup.
+       */
       const render = (result) => renderToStaticMarkup(createElement(SubsystemResponse, result))
       const markup = render(buttonSave)
       assert.equal(markup, render(chatSave))
