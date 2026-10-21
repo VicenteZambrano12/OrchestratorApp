@@ -104,7 +104,7 @@ resource "google_cloud_run_v2_service" "backend" {
           path    = "orch_app_secret.json"
           # Decimal 292 is 0444: the non-root process can read the root-owned
           # secret file, but cannot write it.
-          mode    = 292
+          mode = 292
         }
       }
     }

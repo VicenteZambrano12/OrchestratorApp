@@ -27,12 +27,13 @@ ROLE_NAMES="$(gcloud iam roles list --project="${PROJECT_ID}" --format='value(na
 if ! grep -Fxq "projects/${PROJECT_ID}/roles/${MANAGE_ROLE}" <<< "${ROLE_NAMES}"; then
   gcloud iam roles create "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
     --title="Orchestrator image repository management" \
-    --description="Read/update the application repository and delete old image versions." \
-    --permissions=artifactregistry.repositories.get,artifactregistry.repositories.update,artifactregistry.versions.delete \
+    --description="Read/update the application repository and delete old image versions and tags." \
+    --permissions=artifactregistry.repositories.get,artifactregistry.repositories.update,artifactregistry.tags.delete,artifactregistry.versions.delete \
     --stage=GA --quiet
 else
   gcloud iam roles update "${MANAGE_ROLE}" --project="${PROJECT_ID}" \
-    --permissions=artifactregistry.repositories.get,artifactregistry.repositories.update,artifactregistry.versions.delete \
+    --description="Read/update the application repository and delete old image versions and tags." \
+    --permissions=artifactregistry.repositories.get,artifactregistry.repositories.update,artifactregistry.tags.delete,artifactregistry.versions.delete \
     --quiet
 fi
 
